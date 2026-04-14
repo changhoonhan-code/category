@@ -1,0 +1,20 @@
+---
+description: Audio Step 3 — Sync. Word-level timestamp alignment.
+---
+
+# /sync
+
+> **Tool-Only Step**: Execute the timestamp alignment script.
+
+1. Execute the word-level alignment tool with full arguments:
+
+```bash
+python tools/word_align.py \
+    --audio-dir    data/narration_audio/ \
+    --manifest     data/narration_audio/manifest.json \
+    --script       data/script_output.json \
+    --output       data/word_timestamps.json \
+    --updated-script data/final_script_with_narration.json
+```
+
+2. Upon completion, instruct the user to start a new session with `/run_media` (or `/broll`) for media mapping.

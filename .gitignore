@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+
+# ReviewLens Temporary & Scratch files
+tmp/
+scratch/
+products/
+tools/asset/
+data/
+.gemini/
+
+# OS
+.DS_Store
+Thumbs.db
