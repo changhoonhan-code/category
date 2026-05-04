@@ -1,7 +1,7 @@
 """
-Phase 1-B 변환 도구 — Tone Editor 직후, Head Writer 직전에 실행.
+Phase 1-B 변환 도구 — Creative Director 직후, Head Writer 직전에 실행.
 
-draft_script.json(DV + Tone Editor의 critique_log 포함)을 정제하여
+draft_script.json(DV + Creative Director의 critique_log 포함)을 정제하여
 Head Writer가 바로 읽을 수 있는 깨끗한 script_output.json을 생성한다.
 
 기능:
@@ -20,30 +20,18 @@ import os
 import sys
 from collections import Counter
 
-from config import DATAS_DIR
+from config import DATAS_DIR, contracts
 
 # ── 기본 경로 ──────────────────────────────────────────────────────────────
 DEFAULT_INPUT = os.path.join(DATAS_DIR, "draft_script.json")
 DEFAULT_OUTPUT = os.path.join(DATAS_DIR, "script_output.json")
+OUTLINE_INPUT = os.path.join(DATAS_DIR, "comparison_outline.json")
 
-# ── Head Writer에 전달해야 하는 Root 필드 목록 ──────────────────────────────
-# 이 목록에 없는 root-level 키는 작업용 임시 필드로 간주하여 제거
-ALLOWED_ROOT_KEYS = {
-    "category_name",
-    "products",
-    "video_question",
-    "excluded_themes",
-    "teaser_payoff_map",
-    "scenes",
-}
 
-# ── 제거 대상 필드 (명시적 블랙리스트) ──────────────────────────────────────
-BLACKLISTED_ROOT_KEYS = {
-    "critique_log",
-    "phase_completion",
-    "editor_notes",
-    "assembler_metadata",
-}
+# ── Head Writer에 전달해야 하는 Root 필드 목록 — pipeline_contracts.json ────
+_schema = contracts()["script_schema"]
+ALLOWED_ROOT_KEYS = set(_schema["allowed_root_keys"])
+BLACKLISTED_ROOT_KEYS = set(_schema["forbidden_root_keys"])
 
 
 def print_critique_log_summary(critique_log: list) -> None:
@@ -97,13 +85,32 @@ def prepare_script(data: dict) -> dict:
         if key in data:
             result[key] = data[key]
 
-    # 누락된 필수 키 경고
+    # 누락된 필수 키 경고 및 복구
     missing_keys = ALLOWED_ROOT_KEYS - set(result.keys())
     if missing_keys:
         print(
             f"[prepare_script] ⚠️ WARNING: 필수 root 키 누락: {sorted(missing_keys)}",
             file=sys.stderr,
         )
+        print("[prepare_script] 🔄 comparison_outline.json에서 누락된 키 복구를 시도합니다...", file=sys.stderr)
+        try:
+            with open(OUTLINE_INPUT, "r", encoding="utf-8") as f:
+                outline_data = json.load(f)
+            
+            recovered = []
+            for key in missing_keys:
+                if key in outline_data:
+                    result[key] = outline_data[key]
+                    recovered.append(key)
+            
+            if recovered:
+                print(f"[prepare_script] ✅ 성공적으로 복구됨: {recovered}", file=sys.stderr)
+            
+            still_missing = missing_keys - set(recovered)
+            if still_missing:
+                print(f"[prepare_script] ❌ 끝내 복구하지 못한 키: {sorted(still_missing)}", file=sys.stderr)
+        except Exception as e:
+            print(f"[prepare_script] ❌ 복구 실패 (comparison_outline.json 읽기 오류): {e}", file=sys.stderr)
 
     return result
 

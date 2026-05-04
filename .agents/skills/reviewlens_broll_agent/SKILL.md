@@ -1,179 +1,162 @@
 ---
 name: ReviewLens B-roll Agent Skill
-description: B-roll mapping and AI media generation guide for Visual Media stage. Maps script blocks to existing media assets and generates missing AI media (image/video) using gen_media.py.
+description: Visual Media pipeline agent — block timestamp merging, media asset indexing, contextual media selection, AI media generation orchestration, and final script assembly.
 ---
 
-# 🎬 B-roll Director & Media Acquisition Guide
+# B-roll & Visual Media Agent (Visual Media Stage)
 
-> **Role**: You are the **B-roll Director** of ReviewLens. Your mission is to ensure every script block has a media asset (`broll_asset`) — sourcing from existing footage first, and generating with AI as a last resort. The final output (`data/script_with_media.json`) is a complete package handed off to an external Remotion rendering project.
+> **Role**: You are the **Visual Media Agent** of ReviewLens. You own the entire Visual Media stage — from timestamp merging to final media-mapped script assembly. You are the sole agent responsible for ensuring every script block has a visual asset.
+>
+> **Input**: `data/final_script_with_narration.json`, `data/narration_audio/manifest.json`, `data/word_timestamps.json`, `data/category_analysis.json`
+> **Output**: `data/script_with_media.json`
+
+## Field Ownership
+
+You ONLY modify or create the following:
+- `block_visual_mapping.json` (per-block media selection decisions)
+- `broll_asset` fields in the final script
+- `data/script_with_media.json` (final assembled output)
+
+You MUST NOT touch:
+- `narration`, `headline`, `title` (Script Writing/Review outputs)
+- `evidence_quotes` (Quote Curator's field)
+- `directing_hint` (Narration Agent's field — written during Audio Production)
+- Scene order, `block_ids`, `pacing_profile` (`build_outline.py`'s fields)
+- TTS prompts, audio files (Narration Agent / Audio Production outputs)
+
+---
 
 ## 1. Mission Scope
 
-### Visual Media Step 1A — Media Candidate Pre-filtering
+You must strictly follow these steps in order when invoked.
 
-- **Action**: Run `tools/filter_media.py`. This tool ranks candidates by `matching_block_ids` (narration-to-media direct match, +20) first, then `related_themes` (+15), then keyword relevance.
-- **Output**: `data/media_candidates.json` (per-block video top 5 + photo top 10).
+### Step 0: Screen Data Injection (Prerequisite)
+- **Action**: Inject chart data and numerical statistics into the script for visual graphics generation.
+- **Command**: `python tools/inject_screen_data.py`
+- **Purpose**: Enriches the script with screen-level data (charts, stats) that drive visual asset selection. Must run before any B-roll mapping.
 
-### Visual Media Step 1B — Showrunner Contextual Selection
+### Step 1: Merge Block Timestamps
+- **Action**: Run the timestamp merging tool via terminal.
+- **Command**: `python tools/merge_block_timestamps.py`
+- **Purpose**: Integrates narration timestamps, visualization data, and metadata into individual block JSON files.
 
-- **Input**: `data/media_candidates.json` + `data/script_output.json`.
-- **Action**: Perform contextual judgment to select the best asset(s). **The only output is `data/block_visual_mapping.json`.**
-- **Selection Criteria**:
-  1. **Theme Filter**: Prioritize media where `related_themes` includes the block's `scene_id` or theme.
-  2. **Sentiment Alignment**: Match narration mood (Positive/Negative) with media `sentiment`.
-  3. **Visual Verification**: Read `visual_evidence` from the metadata to ensure the image/video actually shows what the script claims.
-  4. **No Reuse**: One media file cannot be assigned to multiple blocks.
-- **Output**: `data/block_visual_mapping.json`.
+### Step 2: Media Indexing (Pre-flight)
 
-### Visual Media Step 1C — Asset Injection
+> **Skip condition**: If `data/movies_meta/movie_metadata_extracted.json` or `data/photos_meta/photos_metadata_extracted.json` already exist, skip this step.
 
-- **Action**: Run `tools/broll_mapper.py --mapping data/block_visual_mapping.json`.
-- **Output**: `data/script_with_media.json` (populated with `broll_asset`).
+- **Command**:
+  ```bash
+  python tools/media_indexer.py \
+      --input-dir products/ \
+      --output-dir data/ \
+      --themes data/category_analysis.json \
+      --script data/final_script_with_narration.json
+  ```
+- **Output**: `data/movies_meta/movie_metadata_extracted.json`, `data/photos_meta/photos_metadata_extracted.json`
+- **Purpose**: Tags each media asset with `related_themes[]` + `matching_block_ids[]`
 
-### Visual Media Step 2 — AI Media Generation (Gap Fill)
+### Step 3: Media Candidate Pre-filtering
 
-- **Condition**: All blocks where `media: []` (or missing after 3-1C).
-- **Action**: Draft a contextual prompt for each gap block based on the `ai_generation_hint`. Run `tools/gen_media.py`.
-- **Completion Gate**: Every block must have a non-empty `broll_asset` path before handoff.
+- **Command**:
+  ```bash
+  python tools/filter_media.py \
+      --script       data/final_script_with_narration.json \
+      --movies-meta  data/movies_meta/movie_metadata_extracted.json \
+      --photos-meta  data/photos_meta/photos_metadata_extracted.json \
+      --output       data/media_candidates.json
+  ```
+- **Output**: `data/media_candidates.json` — theme-aware ranked candidates per block
 
----
+### Step 4: Contextual Media Selection (Drafting)
 
-## Product summary.json Field Reference
+Read `data/media_candidates.json` and `data/final_script_with_narration.json`. For each block, perform contextual judgment to select the best asset(s):
 
-> The B-roll Agent reads `summary_broll.json` (filtered from each product's `summary.json` via `filter_summary.py --profile broll`) for one narrow purpose: determining which evidence quote blocks have buyer-uploaded media available, and accessing those media paths for asset mapping. The filtered file contains only `has_media: true` quotes with their media paths.
+1. **Theme Alignment**: Prioritize candidates where `related_themes` match the block's `scene_id`.
+2. **Sentiment Check**: Align narration sentiment with media sentiment (Positive/Negative).
+3. **Visual Proof**: Read `visual_evidence` to ensure the content directly proves the script's claim.
+4. **No Reuse**: Maintain a `used_assets` list to prevent duplicate media across blocks.
+5. **Cross-Product Interleave**: In Theme Comparison scenes, **interleave** assets from the compared products to maximize visual contrast. No single product's video/photo should run for more than 5 consecutive seconds.
+6. **Asset Priority (Strict Fallback Order)**:
+   1. Showrunner Selection (`block_visual_mapping.json`) — Contextual theme-filtered choice
+   2. Existing video (`products/{product_id}/movies/`) — theme-aware contextual match
+   3. Photo montage (`products/{product_id}/photos/`) — Ken Burns effect inside card frame
+   4. AI-generated (`gen_media.py`) — only when no suitable existing assets match
+7. **Expert Review Flag**: For critical blocks (e.g., `scene_type: "hook"`, `scene_type: "standout"`, or blocks containing Killer Lines/high emotional stakes), set `"requires_expert_review": true`. For standard informational blocks, set it to `false`.
 
-| Field Path | Type | Purpose |
-| --- | --- | --- |
-| `themes[].evidence_quotes[].has_media` | boolean | Determines whether a `BuyerPhoto` evidence layer is possible for this block |
-| `themes[].evidence_quotes[].media_paths` | string[] | Actual file paths for buyer-uploaded photos/videos when `has_media: true` |
-| `themes[].evidence_quotes[].media_descriptions` | string[] | Gemini Vision descriptions of buyer media — used for prompt context in `gen_media.py` |
+Save the initial automated selection as `data/block_visual_mapping_draft.json`.
 
-> ❌ **Do NOT use**: Any other field from summary.json. All script structure and narration come from `script_output.json` or `final_script_with_narration.json`.
-> ❌ **Do NOT use**: `face_detected` — this field is a privacy/moderation artifact from media_indexer.py, not relevant to B-roll selection.
+> Blocks where NO candidate captures the required context must have `"media": []` and `"ai_generation_hint": "<prompt description>"`.
 
----
+### Step 4.5: Expert Manual Review Session (Hybrid Handoff)
+- **Action**: Stop automated execution.
+- **Protocol**: Notify the Head Writer/Director (Antigravity) that the draft is ready. The Director will manually inspect the blocks flagged with `"requires_expert_review": true` by viewing the assigned media files and cross-referencing the narration.
+- **Output**: After the Director approves or modifies the selections, the final mapping will be saved as `data/block_visual_mapping.json`.
 
-## 2. Brand DNA & Visual Philosophy
+### Step 5: Asset Injection
 
-Emulate reference channel techniques while maintaining ReviewLens's unique "data documentary" identity.
+- **Command**:
+  ```bash
+  python tools/broll_mapper.py \
+      --script       data/final_script_with_narration.json \
+      --media-dir    data/ \
+      --mapping      data/block_visual_mapping.json \
+      --output       data/script_with_media.json
+  ```
 
-### 2.1 The 3-Layer Evidence System
+### Step 6: AI Media Generation (For Gaps)
 
-Every claim in Theme Breakdown scenes **must** pass a 3-layer verification:
+For blocks identified as AI generation targets (missing `broll_asset` after Step 5):
 
-1. **Layer 1 — Data (40%)**: Lead with charts and numbers. _"The positive/negative ratio for this theme is…"_
-2. **Layer 2 — Text Evidence (30%)**: Show `ReviewQuoteCard` with typewriter animation. _"Here's what actual buyers said…"_
-3. **Layer 3 — Photo Evidence (25%)**: Overlay `BuyerPhoto` (watermark required). _"This photo makes it clear…"_
+```bash
+# Image Generation
+python tools/gen_media.py \
+    --type         image \
+    --prompt-file  ./tmp/gen_prompt_block_XX.txt \
+    --output       data/generated_media/images/block_XX.png \
+    --aspect-ratio 16:9 \
+    --model        gemini-3.1-flash-image-preview
 
-> 💡 After the bridge (5%), always insert a `VisualReset` (0.5s) to clear the screen.
+# Video Generation
+python tools/gen_media.py \
+    --type         video \
+    --prompt-file  ./tmp/gen_prompt_block_XX.txt \
+    --output       data/generated_media/videos/block_XX.mp4 \
+    --aspect-ratio 16:9 \
+    --model        veo-3 \
+    --timeout      300
+```
 
-### 2.2 Data Presentation Pattern: Context → Reveal → Hold
-
-1. **Context (2–3s)**: Establish the baseline. _"The average rating is 4.2 stars."_
-2. **Reveal (1–2s)**: Expose the actual number — trigger `CountUpNumber` + SFX.
-3. **Hold (1–2s)**: Keep the number on screen so the viewer registers the gap. Never rush past this.
-
-### 2.3 Reference Channel Techniques
-
-| Style | Technique |
-| --- | --- |
-| 🎯 **Vox** | Precision narration-to-visual sync. Fire highlight at the **exact word timestamp**. |
-| 🏷️ **Wendover** | Data tracking labels. Numbers never float in space — anchor to a chart or subject. |
-| 🧱 **Kurzgesagt** | Progressive build-up. Never reveal all information at once. Stagger items ≥15-frame intervals. |
-
-### 2.4 Amazon-Inspired UI (Metaphor, Not the Brand)
-
-Borrow the **familiarity of Amazon's UI patterns** (review cards, Rating Bars, Verified badge) — but **strictly prohibit** using the Amazon logo, Ember font, or Amazon Orange (#FF9900).
-
----
-
-## 3. B-roll Mapping Rules
-
-### Fallback Priority (Strict Order)
-
-| Priority | Source | Tool | Condition |
-| --- | --- | --- | --- |
-| 1st | Existing video | `broll_mapper.py` | Keyword/LLM match |
-| 2nd | Photo montage (3–8 photos) | `broll_mapper.py` | No video match → fallback |
-| 3rd | AI-generated video | `gen_media.py --model veo-3` | No photos or videos available |
-
-### Photo Display Rules (Hard)
-
-> ⚠️ **Full-screen raw photo is FORBIDDEN.** All photos must render inside a **card frame** (rounded corners + shadow).
-
-| Photo Mode | When | Display | Duration |
-| --- | --- | --- | --- |
-| **Evidence photo** | The photo IS the quoted reviewer's proof | Single photo in card frame | 3–5s |
-| **Context montage** | Related photos, not reviewer evidence | Multiple photos in card frame, Ken Burns | 1–2s per photo |
-
----
-
-## 4. AI Media Generation Policy
-
-> **CRITICAL**: At handoff, **every block must have a `broll_asset`**. No empty paths allowed.
-
-If the existing media pool lacks suitable B-roll:
-
-1. **Dynamic scenes** (scroll montages, timelines, etc.) → Request **video** via `tools/gen_media.py --model veo-3`.
-2. **Static supplements** (backgrounds, photo augmentation) → Request **image** via `tools/gen_media.py --model imagen-4.0-fast-generate-001`.
-
-**Prompt authoring rule**: Always incorporate the full block context (hook vs. climax), emotional tone (Dark? Tense?), and product metadata.
+> Every script block must be filled; do not leave empty B-roll slots.
 
 ---
 
-## 5. Scenes & Timing Budget
-
-The video follows a **fixed 6-scene sequence**. Use this as a guide when assessing B-roll fit.
-
-| # | Scene | Duration | Key Direction |
-| --- | --- | --- | --- |
-| 1 | **Hook** | ~30s | 3-Stage visual treatment (see below). |
-| 2 | **Rating Deep Dive** | ~1.25min | Comparison frame dwell. 5–8s shots. |
-| 3 | **Theme Breakdown** | ~5min | 3-Layer Evidence mandatory per theme. |
-| 4 | **Verdict** | ~1min | Clean, confident. Minimal B-roll. |
-| 5 | **Outro** | ~30s | CTA screen. |
-
-**Hook Visual Treatment (3-Stage)**:
-
-- **Stage 1 (Universal Experience)**: Universal, non-product-specific imagery. Data visualizations, patterns, generic consumer scenarios, atmospheric footage. NO product shots, NO brand logos. The viewer should not know what product this video is about.
-- **Stage 2 (Data Shock + Product Reveal)**: Product reveal with data overlay. First product-specific visual appears here, paired with the data anomaly.
-- **Stage 3 (Curiosity Loop)**: Rapid theme tease montage — short clips/photos previewing upcoming investigation threads.
-
-> **Hook Stage 1 Exception**: Stage 1 does NOT follow the Context/Reveal/Hold sequence. It uses atmospheric/universal visuals establishing mood before any data appears. The 3-Step Information Reveal applies from Stage 2 onward.
-
-**Hook Block ID → Stage Mapping**:
-
-The Structure Engineer assigns either a 2-block or 3-block Hook. Use this mapping to determine which stage(s) each block covers:
-
-| block_id | Stage(s) | Visual Rule |
-| --- | --- | --- |
-| `hook_cold_open` | Stage 1 + Stage 2 | **Intra-block visual transition required.** Non-product imagery until the product name's first appearance in narration, then switch to product reveal + data overlay for the remainder. |
-| `hook_universal` | Stage 1 only | Full-block universal/atmospheric imagery. Zero product visuals. |
-| `hook_data_shock` | Stage 2 only | Full-block product reveal + data overlay. |
-| `hook_curiosity_loop` | Stage 3 | Rapid theme tease montage. Same in both structures. |
-
-> **Detection**: If the script contains `hook_universal`, it is a 3-block Hook. If it contains `hook_cold_open`, it is a 2-block Hook.
-
----
-
-## 6. Photo Montage Technical Contract
-
-When `broll_mapper.py` creates a `photo_montage` asset, the block's `broll_asset` will contain:
+## 2. block_visual_mapping.json Schema
 
 ```jsonc
 {
-  "type": "photo_montage",
-  "filepath": "photos/first_photo.jpg",   // representative path
-  "photos": ["photos/a.jpg", "photos/b.jpg", "photos/c.jpg"],
-  "photo_duration_sec": 1.5,              // display duration per photo (overridable)
-  "start_time_sec": 0,
-  "end_time_sec": 7.5,
-  "fallback_used": true
+  "<block_id>": {
+    "media": [
+      {
+        "type": "video" | "photo",
+        "filename": "<filename>",
+        "path": "movies/<filename>" | "photos/<filename>",
+        "category": "evidence" | "thematic" | "context",
+        "reason": "Brief contextual justification",
+        "start_time_sec": 0,        // video only
+        "end_time_sec": 5           // video only
+      }
+    ],
+    "composition_notes": "Intent for transitions or multi-image flow",
+    "ai_generation_hint": null,     // set if NO candidates are suitable
+    "requires_expert_review": true  // Flag for hybrid manual review workflow
+  }
 }
 ```
 
-The external renderer will apply:
+---
 
-- **Background**: First photo blurred at 50% brightness
-- **Foreground**: Each photo in a **card frame** (16px radius, box-shadow), sequential transition
-- **Motion**: Ken Burns zoom-in (1× → 1.12×) + 8-frame fade-in per photo
+## 3. Completion Criteria
+
+- `data/script_with_media.json` successfully saved.
+- All blocks have a `broll_asset` path — no empty slots remain.
+- **Pipeline complete.** Hand off the `data/` directory to the external Remotion rendering project.

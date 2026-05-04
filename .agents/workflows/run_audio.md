@@ -35,81 +35,51 @@ python tools/filter_script.py --profile narration
 
 Generates `tmp/script_narration.json` — the **full-script** lightweight view with non-narration fields stripped.
 
-This file is preserved throughout the entire 4-Group execution:
+This file is preserved throughout the entire N-group execution:
 - `scene_handoff_manager.py` uses it for block ordering across groups
 - `runner_phase2_tts.py` and `word_align.py` read `data/script_output.json` directly
 
 > [!WARNING]
-> Do NOT overwrite this file with group-filtered versions. Per-group filters use `--output tmp/script_narration_group{id}.json` (see `/prompt` workflow).
+> Do NOT overwrite this file with group-filtered versions. Per-group filters use `--group {N}` which auto-saves to `tmp/script_narration_group{N}.json` (see `/prompt` workflow).
 
 > [!NOTE]
 > `runner_phase2_tts.py` and `word_align.py` continue reading `data/script_output.json` unchanged.
 
 ---
 
-## Step 0.4: Visual Read Pause Map
+## Step 0.4: Prompt File Format
 
-Generate a lookup file that maps each block to its Visual Read Pause duration (if applicable). The Narration Agent uses this to insert `[long pause]` tags without needing access to `evidence_quotes` content.
-
-```bash
-python tools/generate_visual_pause_map.py \
-    --script data/script_output.json \
-    --output tmp/visual_pause_map.json
-```
-
-The script extracts `evidence_quotes` presence and `highlight_phrase` word count per block, then computes `pause_sec` using:
-
-- highlight_phrase ≤ 5 words → 1.5
-- highlight_phrase 6–8 words → 2.0
-- highlight_phrase 9–10 words → 2.5
-
-Blocks without `evidence_quotes` are mapped to `null`.
+The Narration Agent writes each `tts_prompt_{block_id}.txt` as a self-contained prompt: Preamble → Audio Profile → Director's note → Scene → Sample Context → Transcript. Each prompt file is self-contained — the TTS API receives only `prompt`, no separate system instruction.
 
 > [!NOTE]
-> This file is consumed by the Narration Agent in Step 1 (see SKILL.md §6). It does NOT modify `script_output.json`.
+> Skill file loading (SKILL.md) happens **per group session** in the `/prompt` workflow. The agent constructs the Audio Profile section directly from script data — no separate generation step required.
 
 ---
 
-## Step 0.5: System Prompt Base Setup
+## Step 1: Per-Block Prompt Writing (Sequential N-Block Execution)
 
-Generate the TTS system prompt base (Audio Profile + Recording Session + Scene) with dynamic data automatically injected:
-
-```bash
-python tools/generate_tts_system.py
-```
-
-The script reads `category_analysis.json` and injects category name, product names, product count, and total review count into the template. Writes `tmp/tts_system_base.txt`.
-
-The Narration Agent copies this system prompt into the **top of every `tts_prompt_{block_id}.txt`** file, followed by `---`, then Director's Notes and TRANSCRIPT. Each prompt file is self-contained -- the TTS API receives only `prompt`, no separate system instruction.
-
-> [!NOTE]
-> Skill file loading (SKILL.md, directing_reference.md) happens **per group session** in the `/prompt` workflow. Step 0.5 only generates the system prompt text that gets embedded into each prompt file.
-
----
-
-## Step 1: Per-Block Prompt Writing (Hybrid 4-Group Execution)
-
-> This step runs across **4 separate sessions** to prevent cognitive overload.
+> This step runs across **multiple separate sessions** (5 blocks per group) to prevent cognitive overload.
 > Each session loads ALL skill files fresh — the repeated cost is quality insurance, not waste.
 > See `/prompt` workflow for the full per-group execution protocol.
 
 ### Quick Reference
 
-| Group | Filter command | Est. Blocks |
-|-------|---------------|-------------|
-| 1 (Opening) | `python tools/filter_script.py --profile narration --group 1` | 4 |
-| 2a (Theme Front) | `python tools/filter_script.py --profile narration --group 2a` | 7-9 |
-| 2b (Theme Back) | `python tools/filter_script.py --profile narration --group 2b` | 4-6 |
-| 3 (Closing) | `python tools/filter_script.py --profile narration --group 3` | 5-7 |
+Groups are sequential chunks of 5 blocks (`BLOCKS_PER_GROUP` in `config.py`).
+For a 21-block script: 5 groups (5+5+5+5+1 blocks).
+
+```bash
+python tools/filter_script.py --profile narration --group {N}  # N = 1, 2, 3, ...
+```
 
 For each group:
-1. Filter script (`--group`) → Load handoff (if not Group 1) → Load ALL skill files → Write prompts → Self-check → Generate handoff → **New session**
+1. Filter script (`--group N`) → Load handoff (if not Group 1) → Load ALL skill files → Write prompts → Self-check → Generate handoff → **New session**
 
 After all groups:
-1. `python tools/audit_opening_brackets.py` → fix violations if any
+1. `python tools/audit_prompt_quality.py` → fix violations if any
 2. Proceed to Step 2 (Synthesis)
 
-> **Key rules**: no copy-paste DIRECTOR'S NOTES Delivery patterns across blocks — every block's Delivery description must be unique. For blocks with `evidence_quotes`, insert a Visual Read Pause using `[long pause]` tags after the Visual Handoff Line (see SKILL §6). See SKILL §7 Anti-Patterns for full checklist.
+
+> **Key rules**: no copy-paste Style patterns across blocks — every block's Style description must be unique. See SKILL §2 TTS-Safe Writing Rules and §3 Audio Tag Palette for full checklist.
 
 ---
 
@@ -152,45 +122,15 @@ python tools/tts_synthesize.py \
 
 ---
 
-## Step 3: Quality Check & Re-generation
+## Step 3: Post-Synthesis Verification
 
-Tag misfire and monotone/quality checks are automated by `audio_evaluator.py` inside the runner. Remaining manual checks:
+> Tag misfire, monotone, and completeness checks are fully automated by `runner_phase2_tts.py` (Step 2). This step covers only **post-runner manual verification**.
 
-1. **QA failures**: Scan `manifest.json` for `qa_passed: false` — these exhausted all 3 retries. Read `qa_reason` to diagnose, revise prompt, re-generate.
-2. **Block count**: Manifest entries = blocks in `script_output.json`.
-3. **File integrity**: All WAV files non-zero bytes.
-
-   ```bash
-   # List WAV files with sizes — any 0-byte file is a failure
-   ls -la data/narration_audio/*.wav
-   ```
-
-4. **File size**: Flag any WAV under **10 KB** — silent or corrupt.
-5. **Duration range**: `actual_duration_sec` must be **2.0 – 90.0 seconds**.
-6. **Pacing sanity**: `word_count / actual_duration_sec` must be **1.5 – 4.0 words/sec** (English TTS ~130–160 wpm).
-
-7. **Flat text flags**: Check `tmp/flat_text_flags.json` (written by the Narration Agent in Step 1).
-   - `minor` flags: The Narration Agent compensated through directing. Note them but no action required.
-   - `major` flags: The narration text itself is too flat for TTS direction to save. **Action**: Manually revise the `narration` field in `data/script_output.json` for the flagged block(s), then re-write the TTS prompt and re-run synthesis for those blocks only.
-
-   ```bash
-   # After revising narration in script_output.json:
-   # 1. Refresh the filtered view so the agent sees the updated narration
-   python tools/filter_script.py --profile narration
-   # 2. Rewrite tmp/tts_prompt_{block_id}.txt with updated narration
-   # 3. Re-run single-block synthesis:
-   python tools/tts_synthesize.py \
-       --prompt-file  ./tmp/tts_prompt_{BLOCK_ID}.txt \
-       --output       data/narration_audio/{BLOCK_ID}.wav
-   ```
-
-### Re-generation
-
-For any flagged block:
-
-1. Read `qa_reason` in manifest — tag misfire vs. monotone vs. other.
-2. Revise `./tmp/tts_prompt_{block_id}.txt` per SKILL.md §2–§4 directing guidelines.
-3. Re-run manual single-block fallback (Step 2) and update `manifest.json`.
+1. **QA failures**: Scan `manifest.json` for `qa_passed: false` — these exhausted all 3 retries. Read `qa_reason` to diagnose, revise the prompt file, and re-run single-block synthesis (Step 2 fallback command).
+2. **Block count**: Manifest entries must equal blocks in `script_output.json`.
+3. **Flat text flags**: Check `tmp/flat_text_flags.json`.
+   - `minor`: No action required (Narration Agent compensated through directing).
+   - `major`: Manually revise the `narration` field in `data/script_output.json` for the flagged block(s), then re-write the TTS prompt and re-run synthesis.
 
 ---
 
@@ -221,4 +161,4 @@ All of the following must be true:
 - [ ] `data/final_script_with_narration.json` exists
 - [ ] Manifest block count = `script_output.json` block count
 - [ ] All WAV files referenced in the manifest are non-zero bytes
-- [ ] `tmp/bracket_audit_report.json` exists with `status: PASS` (run `python tools/audit_opening_brackets.py` if missing)
+- [ ] `tmp/prompt_audit_report.json` exists with `status: PASS` (run `python tools/audit_prompt_quality.py` if missing)

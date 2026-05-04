@@ -8,4 +8,4 @@ description: Audio Step 2 — TTS. Audio synthesis engine execution and QA.
 
 1. In the console, execute `python tools/runner_phase2_tts.py` (or the designated synthesis tool).
 2. Based on the prompts, actual audio files will be generated in `data/narration_audio/`.
-3. Upon completion, execute the next step: `/sync`.
+3. Upon completion, ask the user if they want to proceed to the next step: `/sync`.

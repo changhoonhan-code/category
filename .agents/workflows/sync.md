@@ -17,4 +17,4 @@ python tools/word_align.py \
     --updated-script data/final_script_with_narration.json
 ```
 
-2. Upon completion, instruct the user to start a new session with `/run_media` (or `/broll`) for media mapping.
+2. Upon completion, guide the user to start a new session with `/run_media` (or `/broll`) for media mapping, and ask for confirmation.

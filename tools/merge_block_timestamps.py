@@ -50,7 +50,7 @@ def main():
 
         # 씬 전체의 공통 테마 찾기 (review_id 역추적 방식)
         theme_name_for_scene = None
-        if scene_type == "theme_comparison":
+        if scene_type == "metric_chapter":
             for block in blocks:
                 for quote in block.get("evidence_quotes", []):
                     rid = quote.get("review_id")
@@ -140,7 +140,7 @@ def main():
 
             # 2. 시각화(Visualization) 데이터 병합
             vis_data = None
-            if scene_type == "theme_comparison" and theme_name_for_scene:
+            if scene_type == "metric_chapter" and theme_name_for_scene:
                 for ct in category_data.get("common_themes", []):
                     if ct.get("theme_name") == theme_name_for_scene:
                         vis_data = {
@@ -150,7 +150,7 @@ def main():
                         }
                         break
             
-            elif scene_type == "category_rating_overview":
+            elif scene_type == "intro_credibility":
                 chart_data = []
                 for p in category_data.get("products", []):
                     chart_data.append({
@@ -175,15 +175,15 @@ def main():
                     "contradiction_summary": hook_data.get("contradiction_summary")
                 }
 
-            elif scene_type == "standout":
-                standout_mapping = blueprint_data.get("standout_mapping", [])
-                standout_info = next((s for s in standout_mapping if s.get("product_id", "") in block_id), None)
-                if standout_info:
+            elif scene_type == "landmine":
+                landmine_mapping = blueprint_data.get("landmine_mapping", [])
+                landmine_info = next((s for s in landmine_mapping if s.get("product_id", "") in block_id), None)
+                if landmine_info:
                     vis_data = {
-                        "data_type": "standout_mapping",
-                        "product_id": standout_info.get("product_id"),
-                        "theme_name": standout_info.get("theme_name"),
-                        "why_unique": standout_info.get("why_unique")
+                        "data_type": "landmine_mapping",
+                        "product_id": landmine_info.get("product_id"),
+                        "fatal_flaw_theme": landmine_info.get("fatal_flaw_theme"),
+                        "warning_frame": landmine_info.get("warning_frame")
                     }
 
             if vis_data:

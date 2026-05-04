@@ -8,11 +8,11 @@ Cross-Product Analyzer — 다중 제품 summary.json을 비교 분석하여 cat
 단계별 구현:
     Step 1: LOAD   — 데이터 수집 + 카테고리 검증 ✅
     Step 2: MATCH  — LLM 테마 클러스터링 ✅
-    Step 3: RANK   — 감성 비율 순위 + 패턴 분류 (미구현)
-    Step 4: DETECT — 모순 탐지 (미구현)
-    Step 5: ISOLATE — 고유 분화점 추출 (미구현)
-    Step 6: ASSESS — 카테고리 인텔리전스 (미구현)
-    Step 7: EMIT   — 최종 조립 + 저장 (미구현)
+    Step 3: RANK   — 감성 비율 순위 + 패턴 분류 ✅
+    Step 4: DETECT — 모순 탐지 ✅
+    Step 5: ISOLATE — 고유 분화점 추출 ✅
+    Step 6: ASSESS — 카테고리 인텔리전스 (Category Analyst Agent 담당 — 이 스크립트 범위 밖)
+    Step 7: EMIT   — 최종 조립 + 저장 ✅
 """
 import argparse
 import json
@@ -212,62 +212,6 @@ def load_product_summaries(
     return category_name, products
 
 
-def print_load_report(category_name: str, products: List[Dict[str, Any]]) -> None:
-    """Step 1 완료 후 요약 리포트를 터미널에 출력."""
-    total_themes = sum(len(p["theme_names"]) for p in products)
-    total_reviews = sum(
-        p["product_data"].get("reviews_analyzed_count", 0) for p in products
-    )
-
-    print("\n" + "=" * 60)
-    print("  Cross-Product Analyzer - Step 1: LOAD Report")
-    print("=" * 60)
-    print(f"  Category : {category_name}")
-    print(f"  Products : {len(products)}")
-    print(f"  Total Reviews Analyzed : {total_reviews:,}")
-    print(f"  Total Themes (pre-clustering) : {total_themes}")
-    print("-" * 60)
-
-    for p in products:
-        pd_ = p["product_data"]
-        sold = pd_.get("sold_last_month", "")
-        sold_str = f" | Sold: {sold}" if sold else ""
-        pop_gap = pd_.get("population_gap", 0)
-
-        print(
-            f"  {p['product_id']}: {p['product_name']}\n"
-            f"    Rating: {pd_.get('all_time_rating_avg', '?')} "
-            f"({pd_.get('all_time_rating_count', '?'):,} ratings)"
-            f"{sold_str}\n"
-            f"    Recent: {pd_.get('recent_review_rating_avg', '?')} "
-            f"({pd_.get('recent_review_count', '?')} reviews) "
-            f"| Pop Gap: {pop_gap}\n"
-            f"    Themes: {len(p['theme_names'])} "
-            f"| Reviews Analyzed: {pd_.get('reviews_analyzed_count', '?')}"
-        )
-
-    print("-" * 60)
-
-    # 전 제품 테마 이름 목록 출력 (Step 2 클러스터링 입력 미리보기)
-    print("  Theme Names (per product):")
-    for p in products:
-        print(f"\n    [{p['product_id']}] {p['product_name']}:")
-        for tn in p["theme_names"]:
-            # 해당 테마의 감성 분포 요약
-            theme_data = next(
-                (t for t in p["themes"] if t.get("theme_name") == tn), None
-            )
-            if theme_data:
-                sd = theme_data.get("sentiment_distribution", {})
-                pos = sd.get("positive", 0)
-                neg = sd.get("negative", 0)
-                total = pos + neg + sd.get("neutral", 0)
-                ratio = pos / total if total > 0 else 0
-                print(f"      - {tn:40s}  mentions:{theme_data.get('mention_count', 0):3d}  pos_ratio:{ratio:.2f}")
-            else:
-                print(f"      - {tn}")
-
-    print("\n" + "=" * 60)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -301,6 +245,7 @@ describe the same underlying user experience, and group them into semantic clust
    — these likely describe the same dimension and should be merged.
 
 3. **DO NOT over-cluster.** Apply these separation principles:
+   (Example of what NOT to merge: DO NOT merge 'Microphone Quality' and 'Call Quality' into a single cluster.)
 
    a) **Hardware vs Experience**: The physical component is distinct from the
       end-to-end experience it enables.
@@ -318,7 +263,8 @@ describe the same underlying user experience, and group them into semantic clust
    e) **Aesthetics vs Longevity**: Perceived build quality / premium feel
       is distinct from long-term durability / survival.
 
-   When in doubt, **keep themes separate** rather than over-merging.
+   When in doubt between distinct consumer pains (like physical pain vs falling out), **keep them separate**.
+   However, for sub-features that serve the SAME ultimate macro-experience (e.g., merging "Charging Speed", "Charging Reliability", "Charging Compatibility" into "Charging Experience"), **MERGE them** to preserve statistical weight.
 
 4. **DISAMBIGUATION HEURISTIC (Complex Names)**:
    For complex or compound theme names, determine the CORE consumer experience being evaluated.
@@ -329,7 +275,8 @@ describe the same underlying user experience, and group them into semantic clust
    No theme may be omitted or duplicated.
 
 6. **canonical_name** should be the most widely understood English term
-   for that experience dimension. Prefer general over brand-specific phrasing.
+   for that experience dimension. Keep it concise (1-3 words).
+   Prefer general over brand-specific phrasing.
 
 7. **coverage** = number of distinct products with at least one member in this cluster.
 
@@ -488,45 +435,6 @@ def cluster_themes_via_llm(
     return result
 
 
-def print_match_report(result: ThemeClusteringResult) -> None:
-    """Step 2 완료 후 요약 리포트를 터미널에 출력."""
-    # common(2개 이상 제품 공유) vs unique(1개 제품 전용) 분류
-    common_clusters = [c for c in result.clusters if c.coverage >= 2]
-    unique_clusters = [c for c in result.clusters if c.coverage == 1]
-
-    print("\n" + "=" * 60)
-    print("  Cross-Product Analyzer - Step 2: MATCH Report")
-    print("=" * 60)
-    print(f"  Common themes (coverage >= 2) : {len(common_clusters)} clusters")
-    print(f"  Unique themes (coverage == 1) : {len(unique_clusters)} themes")
-    print(f"  Total clusters               : {len(result.clusters)}")
-    print("-" * 60)
-
-    # Common 클러스터 상세 출력 (coverage 내림차순 → 이름순)
-    if common_clusters:
-        print("\n  [+] Common Clusters:")
-        common_sorted = sorted(common_clusters, key=lambda c: (-c.coverage, c.canonical_name))
-        for c in common_sorted:
-            # 제품별 원본 테마명 나열
-            member_strs = [f"{m.product_id}:{m.original_theme_name}" for m in c.members]
-            print(f"    [{c.coverage}P] {c.canonical_name}")
-            for ms in member_strs:
-                print(f"         <- {ms}")
-
-    # Unique 클러스터 요약 출력
-    if unique_clusters:
-        print(f"\n  [*] Unique Themes ({len(unique_clusters)}):")
-        unique_sorted = sorted(unique_clusters, key=lambda c: c.canonical_name)
-        for c in unique_sorted:
-            owner = c.members[0].product_id if c.members else "?"
-            orig = c.members[0].original_theme_name if c.members else "?"
-            # canonical_name과 원본이 같으면 원본 생략
-            if c.canonical_name == orig:
-                print(f"    [{owner}] {c.canonical_name}")
-            else:
-                print(f"    [{owner}] {c.canonical_name} <- {orig}")
-
-    print("\n" + "=" * 60)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -593,24 +501,25 @@ def process_quantitative_data(products: List[Dict[str, Any]], clustering_result:
         # STEP 5: ISOLATE (Unique Strengths: Coverage=1)
         if coverage == 1:
             member = members_data[0]
-            if member["positive_ratio"] >= 0.8:
-                quotes = member.get("evidence_quotes", [])
-                pos_quotes = [q for q in quotes if q.get("star_rating", 0) >= 4 and q.get("sentiment") == "Positive"]
-                pos_quotes.sort(key=lambda x: x.get("helpful_count", 0), reverse=True)
-                best_quote = dict(pos_quotes[0]) if pos_quotes else None
-                if best_quote:
-                    best_quote["product_id"] = member["product_id"]
+            quotes = member.get("evidence_quotes", [])
+            pos_quotes = [q for q in quotes if q.get("star_rating", 0) >= 4 and q.get("sentiment") == "Positive"]
+            pos_quotes.sort(key=lambda x: x.get("helpful_count", 0), reverse=True)
+            best_quote = dict(pos_quotes[0]) if pos_quotes else None
+            if best_quote:
+                best_quote["product_id"] = member["product_id"]
 
-                unique_strengths_data.append({
-                    "product_id": member["product_id"],
-                    "theme_name": cluster.canonical_name,
-                    "original_theme_name": member["original_theme_name"],
-                    "positive_ratio": round(member["positive_ratio"], 3),
-                    "mention_count": member["mention_count"],
-                    "why_unique": "",
-                    "recommended_use_case": "",
-                    "best_quote": best_quote
-                })
+            unique_strengths_data.append({
+                "product_id": member["product_id"],
+                "theme_name": cluster.canonical_name,
+                "original_theme_name": member["original_theme_name"],
+                "positive_ratio": round(member["positive_ratio"], 3),
+                "mention_count": member["mention_count"],
+                "ratio_gap": round(member["positive_ratio"], 3),
+                "is_exclusive_feature": True,  # coverage==1: 이 제품만 보유한 독점 기능
+                "why_unique": "",
+                "recommended_use_case": "",
+                "best_quote": best_quote
+            })
             continue
 
         # STEP 3: RANK (Common Themes)
@@ -643,28 +552,31 @@ def process_quantitative_data(products: List[Dict[str, Any]], clustering_result:
             cat_pattern_type = "differentiator"
 
         # STEP 5: ISOLATE (독보적 긍정 테마 in Common Theme)
-        if getattr(cluster, "coverage", coverage) >= 2:
-            highs = [md for md in members_data if md["positive_ratio"] >= 0.8]
-            others = [md for md in members_data if md["positive_ratio"] < 0.5]
-            if len(highs) == 1 and len(others) == len(members_data) - 1:
-                target_md = highs[0]
-                quotes = target_md.get("evidence_quotes", [])
-                pos_quotes = [q for q in quotes if q.get("star_rating", 0) >= 4 and q.get("sentiment") == "Positive"]
-                pos_quotes.sort(key=lambda x: x.get("helpful_count", 0), reverse=True)
-                best_quote = dict(pos_quotes[0]) if pos_quotes else None
-                if best_quote:
-                    best_quote["product_id"] = target_md["product_id"]
+        # 정합성 수정: LLM이 반환한 객체의 속성 대신 실제 계산된 정확한 로컬 coverage 변수를 사용
+        if coverage >= 2:
+            target_md = members_data[0]
+            second_md = members_data[1]
+            ratio_gap = target_md["positive_ratio"] - second_md["positive_ratio"]
+            
+            quotes = target_md.get("evidence_quotes", [])
+            pos_quotes = [q for q in quotes if q.get("star_rating", 0) >= 4 and q.get("sentiment") == "Positive"]
+            pos_quotes.sort(key=lambda x: x.get("helpful_count", 0), reverse=True)
+            best_quote = dict(pos_quotes[0]) if pos_quotes else None
+            if best_quote:
+                best_quote["product_id"] = target_md["product_id"]
 
-                unique_strengths_data.append({
-                    "product_id": target_md["product_id"],
-                    "theme_name": cluster.canonical_name,
-                    "original_theme_name": target_md["original_theme_name"],
-                    "positive_ratio": round(target_md["positive_ratio"], 3),
-                    "mention_count": target_md["mention_count"],
-                    "why_unique": "",
-                    "recommended_use_case": "",
-                    "best_quote": best_quote
-                })
+            unique_strengths_data.append({
+                "product_id": target_md["product_id"],
+                "theme_name": cluster.canonical_name,
+                "original_theme_name": target_md["original_theme_name"],
+                "positive_ratio": round(target_md["positive_ratio"], 3),
+                "mention_count": target_md["mention_count"],
+                "ratio_gap": round(ratio_gap, 3),
+                "is_exclusive_feature": False,  # coverage>=2: common theme의 leader
+                "why_unique": "",
+                "recommended_use_case": "",
+                "best_quote": best_quote
+            })
 
         # STEP 4: DETECT (Contradiction pairs)
         contradiction_pairs = []
@@ -694,9 +606,11 @@ def process_quantitative_data(products: List[Dict[str, Any]], clustering_result:
                 })
 
         # 4-B. Cross-product (편차가 큰 differentiator 테마일 경우)
-        if max_ratio - min_ratio > 0.4 and len(members_data) >= 2:
+        # 정합성 수정: max_ratio - min_ratio > 0 은 모든 테마를 포함하므로, 'differentiator'의 의미에 맞게 유의미한 편차(예: 20% 이상 격차)가 있을 때만 크로스 모순으로 탐지
+        if (max_ratio - min_ratio) >= 0.2 and len(members_data) >= 2:
             first = members_data[0]
             last = members_data[-1]
+            ratio_gap = first["positive_ratio"] - last["positive_ratio"]
             first_quotes = [q for q in first.get("evidence_quotes", []) if q.get("star_rating", 0) >= 4 and q.get("sentiment") == "Positive"]
             last_quotes = [q for q in last.get("evidence_quotes", []) if q.get("star_rating", 0) <= 2 and q.get("sentiment") == "Negative"]
             
@@ -713,6 +627,7 @@ def process_quantitative_data(products: List[Dict[str, Any]], clustering_result:
                     "type": "cross_product",
                     "product_id": None,
                     "product_ids": [first["product_id"], last["product_id"]],
+                    "ratio_gap": round(ratio_gap, 3),
                     "positive_quote": pos_q,
                     "negative_quote": neg_q,
                     "resolution_hypothesis": ""
@@ -730,14 +645,19 @@ def process_quantitative_data(products: List[Dict[str, Any]], clustering_result:
             last_quote = best_last[0] if best_last else (members_data[-1].get("evidence_quotes", [{}])[0] if members_data[-1].get("evidence_quotes") else {})
 
             if first_quote and last_quote:
+                first_q_copy = dict(first_quote)
+                first_q_copy["product_id"] = members_data[0]["product_id"]
+                last_q_copy = dict(last_quote)
+                last_q_copy["product_id"] = members_data[-1]["product_id"]
+
                 best_evidence = {
                     "first_place": {
                         "product_id": members_data[0]["product_id"],
-                        "quote": first_quote
+                        "quote": first_q_copy
                     },
                     "last_place": {
                         "product_id": members_data[-1]["product_id"],
-                        "quote": last_quote
+                        "quote": last_q_copy
                     }
                 }
 
@@ -751,135 +671,6 @@ def process_quantitative_data(products: List[Dict[str, Any]], clustering_result:
         })
 
     return common_themes_data, unique_strengths_data
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Step 6: ASSESS — LLM 카테고리 인텔리전스 평가
-# ══════════════════════════════════════════════════════════════════════════════
-
-class ThemeAssessment(BaseModel):
-    theme_name: str = Field(description="Canonical theme name")
-    category_pattern: str = Field(description="Qualitative description of the category-wide trend for this theme (e.g., 'Structural limitation of open-ear design', 'All exceed expectations')")
-    resolution_hypotheses: List[str] = Field(description="Logical explanation for each contradiction pair. Array order must match the input contradiction pairs order.", default_factory=list)
-
-class UniqueStrengthAssessment(BaseModel):
-    product_id: str
-    theme_name: str
-    why_unique: str = Field(description="Why this unique feature is a differentiator")
-    recommended_use_case: str = Field(description="Who would benefit most from this feature")
-
-class CategoryIntelligence(BaseModel):
-    maturity_assessment: str = Field(description="Overall maturity/status of this product category")
-    universal_strengths: List[str] = Field(description="Strengths shared globally across products")
-    universal_weaknesses: List[str] = Field(description="Weaknesses universally complained about")
-    buy_in_category: str = Field(description="General statement on when to buy into this category")
-    avoid_category: str = Field(description="General statement on when to avoid this category")
-
-class CategoryIntelligenceResult(BaseModel):
-    theme_assessments: List[ThemeAssessment]
-    unique_assessments: List[UniqueStrengthAssessment]
-    category_intelligence: CategoryIntelligence
-
-_ASSESS_PROMPT = """\
-You are a data journalist producing rigorous, unbiased technology reviews. Your task is to provide qualitative "Category Intelligence" by analyzing the quantitative data and contradiction pairs discovered across {product_count} products in the "{category}" category.
-
-We have aggregated the reviews and grouped them into:
-1. COMMON THEMES (discussed across multiple products)
-2. UNIQUE STRENGTHS (highly positive themes specific to one product)
-
-## QUANTITATIVE SUMMARY
-{quantitative_summary}
-
-## CRITICAL RULES
-- **No Rankings or "Winner/Loser" Framing**: Do NOT use terms like "1st place", "the winner", or "ranks highest". We focus on horizontal differentiation and structural comparisons, not vertical rankings.
-- **No Marketing Fluff**: Use objective, direct language. Analyze the *why* behind the numbers. Focus on technical causes, physical form factors, or user expectations vs. reality.
-
-## INSTRUCTIONS
-1. For each Common Theme, analyze its `category_pattern_type` and provide a qualitative `category_pattern` explaining *why* this sentiment distribution is happening across the category.
-2. If there are contradictions (`contradiction_pairs`), provide a brief `resolution_hypotheses` array explaining the discrepancy based on the quotes (Order MUST match the pairs in summary).
-3. For each Unique Strength, explain `why_unique` and define the `recommended_use_case` (e.g., who specifically should buy this).
-4. Synthesize a high-level `category_intelligence` evaluating category maturity, universal pros/cons, and bottom-line buying adivce based purely on the data.
-
-Provide the exact structured JSON according to the schema.
-"""
-
-def assess_via_llm(products: List[Dict], common_themes: List[Dict], unique_strengths: List[Dict], category_name: str) -> CategoryIntelligenceResult:
-    # Build product name map for context
-    p_name_map = {p["product_id"]: p["product_name"] for p in products}
-
-    # 요약 정보 구축 (rankings 단어 배제)
-    summary_data = {
-        "common_themes": [],
-        "unique_strengths": []
-    }
-    for ct in common_themes:
-        summary_data["common_themes"].append({
-            "theme_name": ct["theme_name"],
-            "type": ct["category_pattern_type"],
-            "sentiment_comparison": [
-                {
-                    "product": f"{r['product_id']} ({p_name_map.get(r['product_id'], 'Unknown')})",
-                    "pos_ratio": r["positive_ratio"]
-                }
-                for r in ct["rankings"]
-            ],
-            "contradiction_pairs": [
-                {
-                    "type": cp["type"],
-                    "quotes": f"Pos: {cp['positive_quote'].get('text')} vs Neg: {cp['negative_quote'].get('text')}"
-                }
-                for cp in ct["contradiction_pairs"]
-            ]
-        })
-    for ut in unique_strengths:
-         summary_data["unique_strengths"].append({
-            "product": f"{ut['product_id']} ({p_name_map.get(ut['product_id'], 'Unknown')})",
-            "theme_name": ut["theme_name"],
-            "pos_ratio": ut["positive_ratio"]
-         })
-
-    quantitative_summary = json.dumps(summary_data, indent=2)
-    
-    prompt = _ASSESS_PROMPT.format(
-        product_count=len(products),
-        category=category_name,
-        quantitative_summary=quantitative_summary
-    )
-
-    client = genai.Client()
-    model_id = MODELS.get("analysis_pro", "gemini-pro-latest")
-    logger.info(f"  🤖 LLM 호출 (ASSESS): {model_id}")
-
-    try:
-        response = client.models.generate_content(
-            model=model_id,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=CategoryIntelligenceResult,
-                temperature=0.3,
-            ),
-        )
-        parsed = getattr(response, "parsed", None)
-        if parsed and isinstance(parsed, CategoryIntelligenceResult):
-            return parsed
-        
-        raw_text = response.text.replace("```json", "").replace("```", "").strip()
-        raw_dict = json.loads(raw_text)
-        return CategoryIntelligenceResult(**raw_dict)
-    except Exception as e:
-        logger.error(f"  ❌ LLM 평가 실패: {e}")
-        # fallback empty
-        return CategoryIntelligenceResult(
-            theme_assessments=[],
-            unique_assessments=[],
-            category_intelligence=CategoryIntelligence(
-                maturity_assessment="unknown",
-                universal_strengths=[],
-                universal_weaknesses=[],
-                buy_in_category="",
-                avoid_category=""
-            )
-        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 7: EMIT — 최종 결과물 구조화 및 저장
@@ -956,32 +747,9 @@ def emit_final_result(
     products: List[Dict],
     common_themes: List[Dict],
     unique_strengths: List[Dict],
-    assess_result: CategoryIntelligenceResult,
     output_path: Path
 ):
     out_products, snapshot = enhance_products_and_snapshot(products)
-
-    theme_assess_map = { t.theme_name: t for t in assess_result.theme_assessments }
-    for ct in common_themes:
-        ta = theme_assess_map.get(ct["theme_name"])
-        if ta:
-            ct["category_pattern"] = ta.category_pattern
-            for i, cp in enumerate(ct["contradiction_pairs"]):
-                if i < len(ta.resolution_hypotheses):
-                    cp["resolution_hypothesis"] = ta.resolution_hypotheses[i]
-
-    # LLM이 "product_a (Product Name)" 형식으로 반환할 수 있으므로 앞의 ID만 추출하여 매핑 키 생성
-    uniq_assess_map = {}
-    for u in assess_result.unique_assessments:
-        clean_pid = u.product_id.split()[0]
-        uniq_assess_map[f"{clean_pid}_{u.theme_name}"] = u
-        
-    for us in unique_strengths:
-        key = f"{us['product_id']}_{us['theme_name']}"
-        ua = uniq_assess_map.get(key)
-        if ua:
-            us["why_unique"] = ua.why_unique
-            us["recommended_use_case"] = ua.recommended_use_case
 
     final_json = {
         "category_name": category_name,
@@ -992,14 +760,14 @@ def emit_final_result(
         "products": out_products,
         "common_themes": common_themes,
         "unique_strengths": unique_strengths,
-        "category_intelligence": assess_result.category_intelligence.model_dump()
+        "category_intelligence": None
     }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
         json.dump(final_json, f, ensure_ascii=False, indent=2)
 
-    logger.info(f"  💾 카테고리 분석 저장 완료: {output_path}")
+    logger.info(f"  💾 카테고리 후보 저장 완료: {output_path}")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Main
@@ -1018,8 +786,8 @@ def main():
         help="원본 product.json이 있는 디렉토리 (기본: products)"
     )
     parser.add_argument(
-        "--output", type=str, default="data/category_analysis.json",
-        help="최종 출력 경로 (기본: data/category_analysis.json)"
+        "--output", type=str, default="data/category_candidates.json",
+        help="최종 출력 경로 (기본: data/category_candidates.json)"
     )
     args = parser.parse_args()
 
@@ -1035,7 +803,13 @@ def main():
     # ── Step 1: LOAD ───────────────────────────────────────────────────────
     logger.info("Step 1: LOAD — 제품 데이터 수집 + 카테고리 검증")
     category_name, products = load_product_summaries(data_dir, products_dir)
-    print_load_report(category_name, products)
+    # Step 1 요약 로그
+    total_themes = sum(len(p["theme_names"]) for p in products)
+    total_reviews = sum(p["product_data"].get("reviews_analyzed_count", 0) for p in products)
+    logger.info(
+        f"  LOAD 완료: {len(products)}개 제품, "
+        f"{total_reviews:,} reviews, {total_themes} themes (pre-clustering)"
+    )
 
     # ── Step 2: MATCH — 테마 클러스터링 ────────────────────────────────────
     logger.info("Step 2: MATCH — LLM 시맨틱 테마 클러스터링")
@@ -1046,7 +820,13 @@ def main():
             clustering_result = ThemeClusteringResult(**json.load(f))
     else:
         clustering_result = cluster_themes_via_llm(products, cluster_output_path, category=category_name)
-    print_match_report(clustering_result)
+    # Step 2 요약 로그
+    common_count = sum(1 for c in clustering_result.clusters if c.coverage >= 2)
+    unique_count = sum(1 for c in clustering_result.clusters if c.coverage == 1)
+    logger.info(
+        f"  MATCH 완료: {len(clustering_result.clusters)}개 클러스터 "
+        f"(common: {common_count}, unique: {unique_count})"
+    )
 
     # ── Step 3~5: RANK, DETECT, ISOLATE ────────────────────────────────────
     logger.info("Step 3~5: RANK, DETECT, ISOLATE — 정량 평가 및 모순 탐지")
@@ -1054,13 +834,9 @@ def main():
     logger.info(f"  📊 발견된 공통 테마: {len(common_themes)}개")
     logger.info(f"  ⭐ 발견된 고유 강점: {len(unique_strengths)}개")
 
-    # ── Step 6: ASSESS ─────────────────────────────────────────────────────
-    logger.info("Step 6: ASSESS — LLM 카테고리 인텔리전스 평가 (정성 평가)")
-    assess_result = assess_via_llm(products, common_themes, unique_strengths, category_name)
-    
     # ── Step 7: EMIT ───────────────────────────────────────────────────────
     logger.info("Step 7: EMIT — 최종 카테고리 분석 데이터 조립 및 저장")
-    emit_final_result(category_name, products, common_themes, unique_strengths, assess_result, output_path)
+    emit_final_result(category_name, products, common_themes, unique_strengths, output_path)
 
 if __name__ == "__main__":
     main()

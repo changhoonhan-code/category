@@ -20,7 +20,7 @@ if hasattr(sys.stdout, 'reconfigure'):
 if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8')
 
-from config import DATAS_DIR, TOOLS_DIR, TMP_DIR, TTS_SPEED
+from config import DATAS_DIR, TOOLS_DIR, TMP_DIR, TTS_SPEED, TTS_TEMPERATURE
 import tts_synthesize
 from audio_evaluator import validate_audio_quality
 
@@ -50,7 +50,7 @@ async def run_all():
 
     for idx, (scene_id, block) in enumerate(all_blocks):
         block_id = block["block_id"]
-        mood = block.get("bgm_mood", "Neutral")
+        tone = "Neutral"  # reserved for future use
 
         # 프롬프트 파일 필수 — Phase 2에서 작성
         prompt_file = os.path.join(TMP_DIR, f"tts_prompt_{block_id}.txt")
@@ -60,7 +60,23 @@ async def run_all():
             sys.exit(1)
 
         out_path = os.path.join(audio_dir, f"{block_id}.wav")
-        print(f"[runner_phase2] Synthesizing [{idx+1}/{total}] {block_id} (mood={mood})", flush=True)
+        if os.path.exists(out_path):
+            print(f"[runner_phase2] Skipping [{idx+1}/{total}] {block_id} (already exists)", flush=True)
+            import wave
+            try:
+                with wave.open(out_path, 'rb') as w:
+                    actual_dur = w.getnframes() / float(w.getframerate())
+            except Exception:
+                actual_dur = 0.0
+            manifest[block_id] = {
+                "audio_path": out_path,
+                "actual_duration_sec": actual_dur,
+                "qa_passed": True,
+                "qa_reason": "Skipped (already exists)"
+            }
+            continue
+
+        print(f"[runner_phase2] Synthesizing [{idx+1}/{total}] {block_id} (tone={tone})", flush=True)
 
         MAX_QA_RETRIES = 3
         actual_dur = 0.0
@@ -85,6 +101,7 @@ async def run_all():
                     voice=tts_synthesize.DEFAULT_VOICE,
                     model=tts_synthesize.DEFAULT_TTS_MODEL,
                     speed=TTS_SPEED,
+                    temperature=TTS_TEMPERATURE,
                 )
 
                 actual_dur = result.get("actual_duration_sec", 0.0)

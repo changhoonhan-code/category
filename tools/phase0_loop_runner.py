@@ -59,6 +59,7 @@ def main():
             print(f"Error: Data Bridge failed for {product_id}")
             continue
 
+
     print("\n=== Phase 0 Loop Complete ===")
 
 if __name__ == "__main__":

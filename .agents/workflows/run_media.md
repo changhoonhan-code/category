@@ -5,6 +5,8 @@ description: ReviewLens Visual Media — /broll → /gen
 # Visual Media: B-roll Mapping & AI Media Generation
 
 > **This is the final stage of the pipeline.** The output `data/script_with_media.json` is a complete media package that will be handed off to an external Remotion rendering project.
+>
+> **Agent**: The B-roll & Visual Media Agent (`reviewlens_broll_agent`) owns this entire stage. All steps below are executed by the agent following its SKILL.md.
 
 This workflow maps B-roll assets to the finalized narration script and generates missing media using AI generation tools.
 
@@ -20,46 +22,26 @@ Verify the existence of the following files:
 > [!WARNING]
 > If any of the above are missing, output a **warning message** to the user: "Audio Production is not complete. Please run `/run_audio` first." and **STOP** the workflow execution immediately.
 
-## Execution Procedure (Showrunner Action)
+## Execution Procedure
 
-### 3-0. Media Indexing (Pre-flight)
+### Step 0: Screen Data Injection
 
-> **Skip condition**: If `data/movies_meta/movie_metadata_extracted.json` or `data/photos_meta/photos_metadata_extracted.json` already exist, skip this step.
-
-```bash
-python tools/media_indexer.py \
-    --input-dir products/ \
-    --output-dir data/ \
-    --themes data/category_analysis.json \
-    --script data/final_script_with_narration.json
-```
-
-Output: `data/movies_meta/movie_metadata_extracted.json`, `data/photos_meta/photos_metadata_extracted.json`
-— Tags each media asset with `related_themes[]` + `matching_block_ids[]`
-
-### 3-1A. Media Candidate Pre-filtering
-
-Generate per-block media candidate lists prioritized by `related_themes` and keyword relevance:
+Inject chart data and numerical statistics into the script for visual graphics generation. This must run before any B-roll mapping.
 
 ```bash
-python tools/filter_media.py \
-    --script       data/final_script_with_narration.json \
-    --movies-meta  data/movies_meta/movie_metadata_extracted.json \
-    --photos-meta  data/photos_meta/photos_metadata_extracted.json \
-    --output       data/media_candidates.json
+python tools/inject_screen_data.py
 ```
 
-Output: `data/media_candidates.json` — theme-aware ranked candidates.
+### Step 1: B-roll Pipeline (`/broll`)
 
-### 3-1B. Showrunner Contextual Selection
+Run the B-roll & Visual Media Agent. The agent executes all 6 steps defined in `reviewlens_broll_agent/SKILL.md`:
 
-> [!IMPORTANT]
-> **Action**: Read `data/media_candidates.json` and `data/final_script_with_narration.json`. For each block, perform a contextual judgment to select the best asset(s). **The only output of this step is `data/block_visual_mapping.json`.**
-
-1. **Theme Alignment**: Prioritize candidates where `related_themes` match the block's `scene_id`.
-2. **Sentiment Check**: Align narration sentiment with media sentiment (Positive/Negative).
-3. **Visual Proof**: Read `visual_evidence` to ensure the content directly proves the script's claim.
-4. **No Reuse**: Maintain a `used_assets` list to prevent duplicate media across blocks.
+1. **Timestamp Merging**: `python tools/merge_block_timestamps.py`
+2. **Media Indexing** (skip if outputs exist): `python tools/media_indexer.py`
+3. **Candidate Pre-filtering**: `python tools/filter_media.py`
+4. **Contextual Media Selection**: Agent reads candidates + script, performs contextual judgment, saves `data/block_visual_mapping.json`
+5. **Asset Injection**: `python tools/broll_mapper.py`
+6. **AI Media Generation** (for gaps): `python tools/gen_media.py`
 
 **block_visual_mapping.json schema** (per block):
 
@@ -78,7 +60,8 @@ Output: `data/media_candidates.json` — theme-aware ranked candidates.
       }
     ],
     "composition_notes": "Intent for transitions or multi-image flow",
-    "ai_generation_hint": null      // set if NO candidates are suitable
+    "ai_generation_hint": null,      // set if NO candidates are suitable
+    "requires_expert_review": true   // Flag for hybrid manual review workflow
   }
 }
 ```
@@ -86,42 +69,11 @@ Output: `data/media_candidates.json` — theme-aware ranked candidates.
 > [!IMPORTANT]
 > Blocks where NO candidate captures the required context must have `"media": []` and `"ai_generation_hint": "<prompt description>"`.
 
-### 3-1C. Asset Injection
+### Step 2: Gap Fill Verification (`/gen`)
 
-Inject the showrunner's selection into the script:
-
-```bash
-python tools/broll_mapper.py \
-    --script       data/final_script_with_narration.json \
-    --media-dir    data/ \
-    --mapping      data/block_visual_mapping.json \
-    --output       data/script_with_media.json
-```
-
-### 3-2. AI Media Generation (For Gaps)
-
-> ⚠️ **Policy**: Every script block must be filled; do not leave empty B-roll slots.
-
-For blocks identified as AI generation targets (missing `broll_asset` after 3-1C):
-
-```bash
-# Image Generation
-python tools/gen_media.py \
-    --type         image \
-    --prompt-file  ./tmp/gen_prompt_block_XX.txt \
-    --output       data/generated_media/images/block_XX.png \
-    --aspect-ratio 16:9 \
-    --model        gemini-3.1-flash-image-preview
-
-# Video Generation
-python tools/gen_media.py \
-    --type         video \
-    --prompt-file  ./tmp/gen_prompt_block_XX.txt \
-    --output       data/generated_media/videos/block_XX.mp4 \
-    --aspect-ratio 16:9 \
-    --model        veo-3 \
-    --timeout      300
-```
+After the agent completes Step 6, verify:
+- All blocks have a `broll_asset` path — no empty slots remain.
+- If gaps persist, re-run `gen_media.py` with revised prompts.
 
 ## Completion Criteria
 

@@ -1,13 +1,12 @@
 """
-Scene Handoff Manager — Hybrid 4-Group 세션 간 상태 전달 도구.
+Scene Handoff Manager — Sequential N-Block 세션 간 상태 전달 도구.
 
 각 그룹 세션 완료 후, 작성된 tts_prompt_*.txt 파일들을 파싱하여
 다음 세션이 필요로 하는 컨텍스트를 tmp/scene_handoff.json에 누적 저장.
 
 Usage:
     python tools/scene_handoff_manager.py --group 1
-    python tools/scene_handoff_manager.py --group 2a
-    python tools/scene_handoff_manager.py --group 2b
+    python tools/scene_handoff_manager.py --group 2
     python tools/scene_handoff_manager.py --group 3
 
 출력: tmp/scene_handoff.json (누적 모드 — 기존 데이터에 append)
@@ -18,7 +17,7 @@ import os
 import sys
 import glob
 
-from config import TMP_DIR
+from config import TMP_DIR, BLOCKS_PER_GROUP
 from prompt_utils import extract_prompt_info
 
 
@@ -96,7 +95,7 @@ def find_group_prompts(group_id: str) -> list[str]:
     if os.path.exists(HANDOFF_PATH):
         with open(HANDOFF_PATH, "r", encoding="utf-8") as f:
             handoff = json.load(f)
-        for entry in handoff.get("opening_brackets_used", []):
+        for entry in handoff.get("delivery_history", []):
             existing_blocks.add(entry["block_id"])
 
     group_prompts = [
@@ -138,8 +137,7 @@ def update_handoff(group_id: str, prompt_data_list: list[dict]):
             "completed_groups": [],
             "last_block_id": "",
             "last_sentence": "",
-            "archetype_sequence": [],
-            "opening_brackets_used": [],
+            "delivery_history": [],
         }
 
     # 현재 그룹 데이터 추가 (중복 방지)
@@ -154,26 +152,63 @@ def update_handoff(group_id: str, prompt_data_list: list[dict]):
 
         # 중복된 블록이 있으면 기존 항목 제거 (재실행 시 오염 방지)
         new_block_ids = {pd["block_id"] for pd in prompt_data_list}
-        handoff["opening_brackets_used"] = [
-            b for b in handoff["opening_brackets_used"] if b["block_id"] not in new_block_ids
+        handoff["delivery_history"] = [
+            b for b in handoff["delivery_history"] if b["block_id"] not in new_block_ids
         ]
 
-        # opening_brackets_used 누적 (archetype_code 포함)
+        # delivery_history 누적
         for pd in prompt_data_list:
-            handoff["opening_brackets_used"].append({
+            handoff["delivery_history"].append({
                 "block_id": pd["block_id"],
-                "delivery": pd["delivery"],
-                # bracket 필드: pure-prose 아키텍처에서 TRANSCRIPT에 브래킷이 없으므로
-                # 항상 null. cross-group 고유성 검사는 delivery 필드만으로 충분함.
-                # (deprecated: 이전 브래킷 기반 아키텍처의 잔여 필드)
-                "bracket": None,
-                "archetype_code": pd["archetype_code"],
             })
 
-        # archetype_sequence 재구성
-        handoff["archetype_sequence"] = [
-            b.get("archetype_code") for b in handoff["opening_brackets_used"] if b.get("archetype_code")
-        ]
+    # 총 그룹 수 계산 (auto-detect 용)
+    # Priority: script_narration.json (full) → group scripts sum → delivery_history (unreliable fallback)
+    narration_path = os.path.join(TMP_DIR, "script_narration.json")
+    if os.path.exists(narration_path):
+        with open(narration_path, "r", encoding="utf-8") as f:
+            nd = json.load(f)
+        total_blocks = sum(len(s.get("blocks", [])) for s in nd.get("scenes", []))
+    else:
+        # Try to sum blocks across all existing group scripts
+        group_script_blocks = 0
+        g = 1
+        while True:
+            gpath = os.path.join(TMP_DIR, f"script_narration_group{g}.json")
+            if not os.path.exists(gpath):
+                break
+            with open(gpath, "r", encoding="utf-8") as f:
+                gd = json.load(f)
+            group_script_blocks += sum(len(s.get("blocks", [])) for s in gd.get("scenes", []))
+            g += 1
+        if group_script_blocks > 0:
+            # Group scripts only cover completed groups — use filter_script to get full count
+            # Try running filter_script to generate script_narration.json
+            import subprocess
+            result = subprocess.run(
+                ["python", "tools/filter_script.py", "--profile", "narration"],
+                capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(HANDOFF_PATH))
+            )
+            if os.path.exists(narration_path):
+                with open(narration_path, "r", encoding="utf-8") as f:
+                    nd = json.load(f)
+                total_blocks = sum(len(s.get("blocks", [])) for s in nd.get("scenes", []))
+            else:
+                # Can't determine full count — keep existing total_groups if already set
+                total_blocks = handoff.get("total_groups", 1) * BLOCKS_PER_GROUP
+                print(
+                    "[handoff] WARNING: Cannot determine total block count. "
+                    "Run 'python tools/filter_script.py --profile narration' manually.",
+                    file=sys.stderr,
+                )
+        else:
+            total_blocks = len(handoff.get("delivery_history", []))
+            print(
+                "[handoff] WARNING: script_narration.json not found and no group scripts available. "
+                "total_groups may be incorrect. Run 'python tools/filter_script.py --profile narration'.",
+                file=sys.stderr,
+            )
+    handoff["total_groups"] = (total_blocks + BLOCKS_PER_GROUP - 1) // BLOCKS_PER_GROUP
 
     # 저장
     os.makedirs(os.path.dirname(HANDOFF_PATH), exist_ok=True)
@@ -188,8 +223,8 @@ def main():
         description="ReviewLens: Scene Handoff Manager - session state transfer between groups"
     )
     parser.add_argument(
-        "--group", choices=["1", "2a", "2b", "3"],
-        help="Completed group ID (1, 2a, 2b, 3)"
+        "--group", type=int,
+        help="Completed group number (1-based integer)"
     )
     parser.add_argument(
         "--rebuild", action="store_true",
@@ -233,24 +268,22 @@ def main():
             data = extract_prompt_data(prompt_path)
             prompt_data_list.append(data)
             print(
-                f"  [{data['block_id']}] archetype={data['archetype_code'] or '?'} "
+                f"  [{data['block_id']}] "
                 f"bracket={data['first_bracket'][:40]}...",
                 file=sys.stderr,
             )
 
         # handoff를 처음부터 새로 작성
+        total_blocks_count = len(all_prompts)
+        max_groups = (total_blocks_count + BLOCKS_PER_GROUP - 1) // BLOCKS_PER_GROUP
         handoff = {
-            "completed_groups": ["1", "2a", "2b", "3"],
+            "completed_groups": [str(i) for i in range(1, max_groups + 1)],
+            "total_groups": max_groups,
             "last_block_id": prompt_data_list[-1]["block_id"] if prompt_data_list else "",
             "last_sentence": prompt_data_list[-1]["last_sentence"] if prompt_data_list else "",
-            "archetype_sequence": [d["archetype_code"] for d in prompt_data_list if d["archetype_code"]],
-            "opening_brackets_used": [
+            "delivery_history": [
                 {
                     "block_id": d["block_id"],
-                    "delivery": d["delivery"],
-                    # bracket: pure-prose 아키텍쳐에서 TRANSCRIPT에 브래킷 없으므로 null 고정
-                    "bracket": None,
-                    "archetype_code": d["archetype_code"],
                 }
                 for d in prompt_data_list
             ],
@@ -272,14 +305,15 @@ def main():
         return
 
     # 기존 그룹별 모드
-    print(f"[handoff] Processing group {args.group}...", file=sys.stderr)
+    group_id = str(args.group)
+    print(f"[handoff] Processing group {group_id}...", file=sys.stderr)
 
     # 현재 그룹의 프롬프트 파일 찾기
-    group_prompts = find_group_prompts(args.group)
+    group_prompts = find_group_prompts(group_id)
 
     if not group_prompts:
         print(
-            f"[handoff] WARNING: No new prompt files found for group {args.group}. "
+            f"[handoff] WARNING: No new prompt files found for group {group_id}. "
             "Ensure tts_prompt_*.txt files exist in tmp/.",
             file=sys.stderr,
         )
@@ -291,26 +325,26 @@ def main():
         data = extract_prompt_data(prompt_path)
         prompt_data_list.append(data)
         print(
-            f"  [{data['block_id']}] archetype={data['archetype_code'] or '?'} "
+            f"  [{data['block_id']}] "
             f"bracket={data['first_bracket'][:40]}...",
             file=sys.stderr,
         )
 
     # Handoff 업데이트
-    handoff = update_handoff(args.group, prompt_data_list)
+    handoff = update_handoff(group_id, prompt_data_list)
 
     # 결과 출력
     print(json.dumps({
-        "group": args.group,
+        "group": group_id,
         "blocks_processed": len(prompt_data_list),
-        "total_blocks_cumulative": len(handoff["opening_brackets_used"]),
+        "total_blocks_cumulative": len(handoff["delivery_history"]),
         "completed_groups": handoff["completed_groups"],
         "handoff_path": HANDOFF_PATH,
     }))
 
     print(
-        f"[handoff] Group {args.group} complete: {len(prompt_data_list)} blocks processed. "
-        f"Cumulative: {len(handoff['opening_brackets_used'])} blocks across groups "
+        f"[handoff] Group {group_id} complete: {len(prompt_data_list)} blocks processed. "
+        f"Cumulative: {len(handoff['delivery_history'])} blocks across groups "
         f"{', '.join(handoff['completed_groups'])}.",
         file=sys.stderr,
     )

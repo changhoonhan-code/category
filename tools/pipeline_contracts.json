@@ -1,0 +1,128 @@
+{
+  "script_schema": {
+    "_source": "narrative_standards.md",
+    "_consumers": ["validate_script.py", "prepare_script.py"],
+    "required_root_keys": ["category_name", "products", "video_question", "excluded_themes", "teaser_payoff_map", "scenes"],
+    "forbidden_root_keys": ["critique_log", "phase_completion", "editor_notes", "assembler_metadata", "block_annotations"],
+    "allowed_root_keys": ["category_name", "products", "video_question", "excluded_themes", "teaser_payoff_map", "scenes"],
+    "required_block_keys": ["block_id", "narration", "pacing_profile", "evidence_quotes"],
+    "required_quote_keys": ["product_id", "highlight_phrase", "star_rating", "review_id", "selection_reason"],
+    "required_product_keys": ["product_id", "product_name"],
+    "title_exempt_block_ids": ["hook_contradiction", "hook_curiosity_loop", "recommendation_notebook", "recommendation_outro"],
+    "title_max_words": 5
+  },
+
+  "pacing": {
+    "_source": "pacing_profiles.md §1, §4",
+    "_consumers": ["validate_script.py", "build_outline.py"],
+    "valid_profiles": ["breathe", "standard", "dense"],
+    "distribution_guidelines": {
+      "breathe":  {"min": 0.15, "max": 0.25},
+      "standard": {"min": 0.55, "max": 0.70},
+      "dense":    {"min": 0.10, "max": 0.15}
+    },
+    "max_teaser_distance": 3
+  },
+
+  "block_structure": {
+    "_source": "pacing_profiles.md §4, §6",
+    "_consumers": ["build_outline.py", "script_auditor.py"],
+    "narrative_weight_map": {
+      "differentiator":     {"heavy": 3, "standard": 2, "light": null},
+      "universal_weakness": {"heavy": 2, "standard": 2, "light": 1},
+      "universal_strength": {"heavy": 1, "standard": 1, "light": 1},
+      "mixed":              {"heavy": 2, "standard": 2, "light": null}
+    },
+    "template_suffixes": {
+      "differentiator":     ["_showdown", "_fallout", "_context"],
+      "universal_weakness": ["_diagnosis", "_spectrum"],
+      "universal_strength": ["_baseline"],
+      "mixed":              ["_profiles", "_tradeoff"]
+    },
+    "block_range_by_pattern": {
+      "differentiator":     [2, 3],
+      "universal_weakness": [1, 2],
+      "universal_strength": [1, 1],
+      "mixed":              [1, 2]
+    },
+    "runtime_caps": {"3": 22, "4": 24, "5": 27},
+    "expected_suffix_order": {
+      "differentiator":     ["showdown", "fallout", "context"],
+      "universal_weakness": ["diagnosis", "spectrum"],
+      "universal_strength": ["baseline"],
+      "mixed":              ["profiles", "tradeoff"]
+    }
+  },
+
+  "filter_profiles": {
+    "_source": "(hardcoded origin — no .md rule file)",
+    "_consumers": ["filter_category.py", "filter_script.py"],
+    "quote_keep_fields": {
+      "blueprint":     ["text", "star_rating", "review_id", "helpful_count", "is_humorous", "product_id"],
+      "intelligence":  ["text", "product_id", "star_rating", "sentiment"],
+      "writer":        ["text", "review_id", "product_id", "star_rating", "sentiment", "is_humorous", "selection_reason"],
+      "validator":     ["text", "review_id", "product_id", "star_rating", "review_date", "helpful_count", "selection_reason", "is_humorous"],
+      "creative":      ["text", "review_id", "product_id", "star_rating", "is_humorous", "selection_reason"]
+    },
+    "quote_defaults": {
+      "helpful_count": 0,
+      "is_humorous": false
+    }
+  },
+
+  "merge": {
+    "_source": "(hardcoded origin — no .md rule file)",
+    "_consumers": ["merge_validator.py", "merge_creative.py", "merge_curate.py", "script_auditor.py"],
+    "validator_mergeable_fields": ["evidence_quotes"],
+    "creative_mergeable_fields": ["narration", "is_humorous"],
+    "curate_mergeable_fields": ["evidence_quotes", "headline", "title"],
+    "creative_forbidden_fields": ["directing_hint", "pacing_profile", "title", "headline"],
+    "creative_quote_patch_field": "is_humorous",
+    "creative_number_preservation": true,
+    "exempt_block_ids": ["hook_contradiction", "recommendation_notebook", "recommendation_outro"]
+  },
+
+  "annotations": {
+    "_source": "(CD upgrade — downstream HW briefing)",
+    "_consumers": ["merge_creative.py", "generate_briefing.py"],
+    "required_fields": ["block_id", "collision_sentence"],
+    "optional_fields": ["residue_handoff", "humor_position", "flow_note"]
+  },
+
+  "audit": {
+    "_source": "prohibitions.md §2",
+    "_consumers": ["script_auditor.py", "merge_creative.py"],
+    "creative_fix_types": ["Flow Fix", "Humor Injection", "Drama Resolution", "Flag Resolution", "Collision Fix"],
+    "drama_patterns": {
+      "emotional_appeal": [
+        "how (frustrating|devastating|heartbreaking)",
+        "their pain is real",
+        "breaks my heart",
+        "i was shocked"
+      ],
+      "fiction_scenario": [
+        "picture (?:a|this)",
+        "imagine (?:a|this|you)",
+        "coming home to find"
+      ],
+      "anthropomorphization": [
+        "the (?:numbers|data) (?:are |is )?(?:screaming|weeping|weeps|weep|crying|begging)",
+        "numbers speak",
+        "the data weeps"
+      ],
+      "dramatic_framing": [
+        "silent epidemic",
+        "hidden crisis",
+        "ticking time bomb"
+      ]
+    },
+    "humor_minimum": 3
+  },
+
+  "screen_schema": {
+    "_source": "run_plan.md",
+    "_consumers": ["merge_screen.py"],
+    "decision_keys": ["accepted", "decision"],
+    "accepted_values": [true, "accept", "accepted"]
+  }
+}

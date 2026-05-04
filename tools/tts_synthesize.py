@@ -22,7 +22,7 @@ import wave
 from google import genai
 from google.genai import types
 
-from config import MODELS, TTS_VOICE, TTS_SPEED, TTS_SAMPLE_RATE, TTS_SAMPLE_WIDTH, TTS_CHANNELS, MAX_RETRIES, RETRY_BASE_DELAY
+from config import MODELS, TTS_VOICE, TTS_SPEED, TTS_TEMPERATURE, TTS_SAMPLE_RATE, TTS_SAMPLE_WIDTH, TTS_CHANNELS, MAX_RETRIES, RETRY_BASE_DELAY
 
 
 # -- 상수 --
@@ -42,15 +42,12 @@ async def generate_tts(
     prompt: str,
     model: str = DEFAULT_TTS_MODEL,
     voice: str = DEFAULT_VOICE,
+    temperature: float = TTS_TEMPERATURE,
 ) -> bytes:
-    """Gemini TTS API를 호출하여 raw PCM 바이트를 반환한다.
-
-    prompt에 System Prompt + Director's Notes + TRANSCRIPT이 모두 포함되어 있다.
-    Gemini SDK는 동기 전용이므로 asyncio.to_thread로 감싸서 호출.
-    """
+    from google.genai import types
     config = types.GenerateContentConfig(
-        temperature=1.5,
         response_modalities=["AUDIO"],
+        temperature=temperature,
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
                 prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -60,8 +57,7 @@ async def generate_tts(
         ),
     )
 
-    response = await asyncio.to_thread(
-        client.models.generate_content,
+    response = await client.aio.models.generate_content(
         model=model,
         contents=prompt,
         config=config,
@@ -109,9 +105,10 @@ async def synthesize(
     voice: str,
     model: str,
     speed: float = 1.0,
+    temperature: float = TTS_TEMPERATURE,
 ) -> dict:
     """TTS 생성을 재시도 로직과 함께 실행하고 결과 dict를 반환한다."""
-    client = genai.Client()
+    client = genai.Client(http_options={'api_version': 'v1alpha'})
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -120,6 +117,7 @@ async def synthesize(
                 client, prompt,
                 model=model,
                 voice=voice,
+                temperature=temperature,
             )
             duration = save_wav(pcm_data, output_path, speed=speed)
             duration_rounded = float(round(duration, 3))
@@ -177,6 +175,10 @@ def main():
         "--speed", type=float, default=DEFAULT_SPEED,
         help=f"FFmpeg atempo 재생 속도 배율 (기본값: config.TTS_SPEED={DEFAULT_SPEED}, 예: 1.2)",
     )
+    parser.add_argument(
+        "--temperature", type=float, default=TTS_TEMPERATURE,
+        help=f"TTS 표현력 (기본값: config.TTS_TEMPERATURE={TTS_TEMPERATURE}, 0.0~2.0)",
+    )
 
     args = parser.parse_args()
 
@@ -197,6 +199,7 @@ def main():
         voice=args.voice,
         model=args.model,
         speed=args.speed,
+        temperature=args.temperature,
     ))
 
     # 결과를 stdout에 JSON으로 출력

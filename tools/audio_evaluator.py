@@ -30,7 +30,7 @@ TAG_VOCABULARY = {
     "slowly", "speaking", "whispering", "whisper",
     "empathetic", "empathy", "curious", "curiosity",
     "thoughtful", "thoughtfully",
-    "extremely", "fast",
+    "extremely",
     "bracket", "brackets",
     "tag", "tags",
     "breathe", "breathing",

@@ -7,10 +7,11 @@ PASS 시 Phase 2 (Narration) 진입 허용. FAIL 시 에러 상세를 터미널�
 검증 항목:
   - Root 필수 필드 존재 여부
   - Products 배열 구조
-  - Block 필수 필드 (block_id, narration, bgm_mood, pacing_profile, evidence_quotes)
+  - Block 필수 필드 (block_id, narration, pacing_profile, evidence_quotes)
+  - Block title 필드 검증 (Hook/outro 제외, 비어있지 않은 문자열 필수, 5단어 이하)
   - Block ID 유일성
   - EvidenceQuote 필수 필드 + product_id 참조 무결성
-  - bgm_mood / pacing_profile 값 검증
+  - pacing_profile 값 검증
   - 금지 필드 잔류 여부
 
 Usage:
@@ -22,32 +23,23 @@ import json
 import os
 import sys
 
-from config import DATAS_DIR
+from config import DATAS_DIR, contracts
 
 # ── 기본 경로 ──────────────────────────────────────────────────────────────
 DEFAULT_INPUT = os.path.join(DATAS_DIR, "script_output.json")
 
-# ── 검증 상수 ──────────────────────────────────────────────────────────────
-# Root 레벨 필수 키
-REQUIRED_ROOT_KEYS = {"category_name", "products", "video_question", "excluded_themes", "teaser_payoff_map", "scenes"}
+# ── 검증 상수 — pipeline_contracts.json에서 로드 ──────────────────────────
+_schema = contracts()["script_schema"]
+_pacing = contracts()["pacing"]
 
-# Block 레벨 필수 키
-REQUIRED_BLOCK_KEYS = {"block_id", "narration", "bgm_mood", "pacing_profile", "evidence_quotes", "directing_hint"}
-
-# EvidenceQuote 필수 키
-REQUIRED_QUOTE_KEYS = {"product_id", "highlight_phrase", "star_rating", "review_id", "selection_reason"}
-
-# bgm_mood 허용 값
-VALID_BGM_MOODS = {"Bright", "Dark", "Tense", "Neutral", "Triumphant", "Silence"}
-
-# pacing_profile 허용 값
-VALID_PACING_PROFILES = {"breathe", "standard", "dense"}
-
-# 금지 필드 (잔류 시 에러)
-FORBIDDEN_ROOT_KEYS = {"critique_log", "phase_completion", "editor_notes", "assembler_metadata"}
-
-# Products 배열 내 필수 키
-REQUIRED_PRODUCT_KEYS = {"product_id", "product_name"}
+REQUIRED_ROOT_KEYS = set(_schema["required_root_keys"])
+REQUIRED_BLOCK_KEYS = set(_schema["required_block_keys"])
+REQUIRED_QUOTE_KEYS = set(_schema["required_quote_keys"])
+TITLE_EXEMPT_BLOCK_IDS = set(_schema["title_exempt_block_ids"])
+TITLE_MAX_WORDS = _schema["title_max_words"]
+VALID_PACING_PROFILES = set(_pacing["valid_profiles"])
+FORBIDDEN_ROOT_KEYS = set(_schema["forbidden_root_keys"])
+REQUIRED_PRODUCT_KEYS = set(_schema["required_product_keys"])
 
 
 class ValidationError:
@@ -125,11 +117,6 @@ def validate_script(data: dict) -> list[ValidationError]:
                 # block_id 수집 (중복 검사용)
                 all_block_ids.append(block_id)
 
-                # ── 4b. bgm_mood 값 검증 ──
-                bgm = block.get("bgm_mood")
-                if bgm is not None and bgm not in VALID_BGM_MOODS:
-                    errors.append(ValidationError("ERROR", block_loc, f"bgm_mood '{bgm}' 유효하지 않음 — 허용: {VALID_BGM_MOODS}"))
-
                 # ── 4c. pacing_profile 값 검증 ──
                 pacing = block.get("pacing_profile")
                 if pacing is not None and pacing not in VALID_PACING_PROFILES:
@@ -159,9 +146,21 @@ def validate_script(data: dict) -> list[ValidationError]:
                     if sr is not None and (not isinstance(sr, (int, float)) or sr < 1 or sr > 5):
                         errors.append(ValidationError("ERROR", quote_loc, f"star_rating '{sr}' 범위 초과 — 허용: 1-5"))
 
-                    # is_humorous가 block 레벨에 있으면 경고
-                if "is_humorous" in block:
-                    errors.append(ValidationError("ERROR", block_loc, "is_humorous가 block 레벨에 존재 — quote 레벨에만 허용"))
+                # -- 4e. title 필드 검증 --
+                title = block.get("title")
+                if title is None:
+                    # title 필드가 아예 없는 경우
+                    errors.append(ValidationError("ERROR", block_loc, "필수 키 'title' 누락"))
+                elif block_id in TITLE_EXEMPT_BLOCK_IDS:
+                    # 면제 블록은 빈 문자열이어야 함
+                    if title != "":
+                        errors.append(ValidationError("WARNING", block_loc, f"title이 '{title}'이지만 면제 블록(훅/아웃트로)이므로 빈 문자열이어야 함"))
+                else:
+                    # 일반 블록은 비어있지 않은 문자열 필수
+                    if title == "":
+                        errors.append(ValidationError("ERROR", block_loc, "title이 빈 문자열 — 면제 블록이 아니므로 값이 필요"))
+                    elif len(title.split()) > TITLE_MAX_WORDS:
+                        errors.append(ValidationError("WARNING", block_loc, f"title '{title}'이 {TITLE_MAX_WORDS}단어 초과 ({len(title.split())}단어)"))
 
     # ── 5. Block ID 유일성 검증 ──
     seen_ids = set()

@@ -24,20 +24,11 @@ from config import TMP_DIR
 STAGE_TARGETS = {
     "audio": {
         "files": [
-            "flat_text_flags.json",
-            "head_writer_changelog.txt",
-            "visual_pause_map.json",
             "scene_handoff.json",
-            "bracket_audit_report.json",
+            "prompt_audit_report.json",
         ],
         "globs": [
             "tts_prompt_*.txt",
-        ],
-        # audio 세션 시작 시 항상 존재해야 하는 파일: 빈 상태로 초기화
-        # flat_text_flags.json: 에이전트가 flat text 블록이 없어도 파일 자체는
-        # 항상 있어야 run_audio.md Step 3 QA가 오류 없이 동작함
-        "init_files": [
-            {"name": "flat_text_flags.json", "content": {}},
         ],
     },
 }

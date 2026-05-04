@@ -18,13 +18,11 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 from config import MODELS, PROJ_ROOT
-from filter_summary import filter_summary as apply_filter, PROFILES as FILTER_PROFILES
 
 # ── Pydantic Models ────────────────────────────────────────────────────────────
 class EvidenceQuoteSchema(BaseModel):
     review_id: str
     text: str
-    is_humorous: bool
     selection_reason: str
 
 class ThemeInsightsSchema(BaseModel):
@@ -182,15 +180,10 @@ INSTRUCTIONS:
       → selection_reason: "supplementary"
 
 3. For each selected quote, copy the text EXACTLY as written — do not paraphrase.
-4. For each quote, set is_humorous to true if the quote contains genuinely funny, ironic, or memorably witty phrasing that would make a viewer smile. Examples:
-   - A product's headline feature being its biggest flaw (e.g., "disable the AI to save battery")
-   - Unintentionally comedic reviewer phrasing or absurd situations
-   - Dark humor about product failures
-   Do NOT force humor — only tag quotes that are naturally amusing.
 
 OUTPUT JSON STRUCTURE (strictly follow schema):
 Your response will be parsed via strict generic JSON schema (ThemeInsightsSchema).
-For each evidence_quote, specify: review_id, text, is_humorous, selection_reason
+For each evidence_quote, specify: review_id, text, selection_reason
 
 Reviews for theme "{theme}" (sorted by priority, highest first):
 {reviews}
@@ -219,7 +212,7 @@ async def get_theme_insights_from_llm(
     group_sorted["has_media"] = group_sorted["review_id"].map(
         lambda rid: str(rid) in media_index
     )
-    group_sorted["text_length"] = group_sorted["evidence_quote"].astype(str).apply(len)
+    group_sorted["text_length"] = group_sorted["evidence_quote"].str.len().fillna(0)
     
     group_sorted = group_sorted.sort_values(
         by=["text_length", "helpful_count", "has_media"],
@@ -564,7 +557,6 @@ async def generate_theme_analysis_list(
                 "review_id": rid,
                 "review_date": date_map.get(rid),
                 "helpful_count": helpful_map.get(rid, 0),
-                "is_humorous": bool(eq.get("is_humorous", False)),
                 "selection_reason": str(eq.get("selection_reason", "anchor")),
                 "has_media": has_media,
                 "media_info": media_info,
@@ -659,18 +651,6 @@ async def main():
         json.dump(final_output, f, ensure_ascii=False, indent=2)
 
     logger.info(f"✅ Hierarchical summary saved to {out_path}")
-
-    # Agent별 필터링된 summary 파일 생성
-    original_size = out_path.stat().st_size
-    logger.info(f"Generating agent-filtered summary files (source: {original_size:,} bytes)...")
-    for profile_name, profile_def in FILTER_PROFILES.items():
-        filtered = apply_filter(final_output, profile_def)
-        filter_path = output_dir / f"summary_{profile_name}.json"
-        with filter_path.open("w", encoding="utf-8") as f:
-            json.dump(filtered, f, ensure_ascii=False, indent=2)
-        filtered_size = filter_path.stat().st_size
-        reduction = round(100 * (1 - filtered_size / original_size), 1)
-        logger.info(f"  ✅ {filter_path.name}: {filtered_size:,} bytes ({reduction}% reduction)")
 
 if __name__ == "__main__":
     asyncio.run(main())

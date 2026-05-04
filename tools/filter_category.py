@@ -1,18 +1,16 @@
 """
-Filter category_analysis.json for agent-specific profiles — category_analysis.json의
-무거운 quote 본문과 불필요 필드를 제거하여 에이전트별 토큰 최적화 축소본을 생성.
+Filter category data for agent-specific profiles — 무거운 quote 본문과
+불필요 필드를 제거하여 에이전트별 토큰 최적화 축소본을 생성.
 
 Usage:
     python tools/filter_category.py --profile blueprint
-    python tools/filter_category.py --profile tone_editor
-    python tools/filter_category.py --profile tone_editor --output data/category_tone_editor.json
-    python tools/filter_category.py --profile structure_engineer
-    python tools/filter_category.py --profile structure_engineer --blueprint data/comparison_blueprint.json
+    python tools/filter_category.py --profile screen --input data/category_candidates.json --output data/category_screen.json
+    python tools/filter_category.py --profile intelligence --input data/category_screened.json --output data/category_intelligence.json
     python tools/filter_category.py --profile writer
     python tools/filter_category.py --profile writer --outline data/comparison_outline.json
     python tools/filter_category.py --profile validator
 
-Profiles: blueprint, tone_editor, structure_engineer, writer, validator
+Profiles: blueprint, screen, intelligence, writer, validator
 """
 import argparse
 import json
@@ -35,15 +33,15 @@ PROFILES = {
         "filter_fn": "filter_for_blueprint",
         "output_suffix": "blueprint",
     },
-    "tone_editor": {
-        "description": "BGM 전략, 유머 배분, 패턴 타입 판별용 축소본",
-        "filter_fn": "filter_for_tone_editor",
-        "output_suffix": "tone_editor",
+    "screen": {
+        "description": "Data Screener Agent 판단용 축소본 — quote 본문 제거, ratio_gap/mention_count 통계만 보존",
+        "filter_fn": "filter_for_screen",
+        "output_suffix": "screen",
     },
-    "structure_engineer": {
-        "description": "Structure Engineer 구조 설계용 축소본 — selected_themes만 필터링, quote 최소화",
-        "filter_fn": "filter_for_structure_engineer",
-        "output_suffix": "structure_engineer",
+    "intelligence": {
+        "description": "Category Analyst Agent 정성 분석용 축소본 — quote text 보존, 불필요 메타 제거",
+        "filter_fn": "filter_for_intelligence",
+        "output_suffix": "intelligence",
     },
     "writer": {
         "description": "Writer Agent 초안 작성용 축소본 — assigned_themes만 필터링, quote text 보존",
@@ -58,75 +56,56 @@ PROFILES = {
 }
 
 
-# ── Blueprint Designer Profile ──────────────────────────────────────────────
+# ── 범용 Quote / Contradiction Pair 필터 ─────────────────────────────────────
+# 프로파일별로 보존할 필드만 다르고 구조는 동일하므로, keep_fields 기반 범용 함수 사용.
+# pipeline_contracts.json에서 로드.
+from config import contracts
 
-def filter_quote_for_blueprint(quote: dict) -> dict:
+_filter_cfg = contracts()["filter_profiles"]
+QUOTE_DEFAULTS = _filter_cfg["quote_defaults"]
+QUOTE_KEEP_FIELDS = _filter_cfg["quote_keep_fields"]
+
+
+def _filter_quote(quote: dict, profile: str) -> dict:
     """
-    Blueprint Designer용 quote 축소.
-    보존: text (Hook/narrative_directive 판단용), star_rating, helpful_count,
-          is_humorous, product_id, review_id
-    제거: sentiment, review_date, selection_reason, has_media, media_info
-    → quote 1개당 약 40-50% 토큰 절감
+    범용 quote 축소 함수.
+    QUOTE_KEEP_FIELDS[profile]에 정의된 필드만 보존하고 나머지는 제거.
+    QUOTE_DEFAULTS에 등록된 필드는 원본에 없을 때 기본값 적용.
     """
     if quote is None:
         return None
-    return {
-        "text": quote.get("text"),
-        "star_rating": quote.get("star_rating"),
-        "review_id": quote.get("review_id"),
-        "helpful_count": quote.get("helpful_count", 0),
-        "is_humorous": quote.get("is_humorous", False),
-        "product_id": quote.get("product_id"),
-    }
+    keep = QUOTE_KEEP_FIELDS[profile]
+    result = {}
+    for field in keep:
+        if field in QUOTE_DEFAULTS:
+            result[field] = quote.get(field, QUOTE_DEFAULTS[field])
+        else:
+            result[field] = quote.get(field)
+    return result
 
 
-def filter_contradiction_pair_for_blueprint(pair: dict) -> dict:
+def _filter_contradiction_pair(pair: dict, profile: str) -> dict:
     """
-    Blueprint Designer용 contradiction_pair 축소.
-    보존: type, product_id/product_ids, positive_quote/negative_quote (축소됨),
-          resolution_hypothesis
+    범용 contradiction_pair 축소 함수.
+    type + product_id/product_ids 라우팅 + quote 축소 + resolution_hypothesis 보존.
     """
-    result = {
-        "type": pair.get("type"),
-    }
-
+    result = {"type": pair.get("type")}
     # within_product이면 product_id, cross_product이면 product_ids
     if pair.get("type") == "within_product":
         result["product_id"] = pair.get("product_id")
     else:
         result["product_ids"] = pair.get("product_ids")
-
-    # quote에서 핵심 필드만 추출
-    result["positive_quote"] = filter_quote_for_blueprint(pair.get("positive_quote"))
-    result["negative_quote"] = filter_quote_for_blueprint(pair.get("negative_quote"))
+    result["positive_quote"] = _filter_quote(pair.get("positive_quote"), profile)
+    result["negative_quote"] = _filter_quote(pair.get("negative_quote"), profile)
     result["resolution_hypothesis"] = pair.get("resolution_hypothesis")
-
     return result
 
 
-def filter_best_evidence_for_blueprint(evidence: dict) -> dict:
-    """
-    Blueprint Designer용 best_evidence 축소.
-    first_place/last_place 각각의 quote에서 핵심 필드만 유지.
-    """
-    if evidence is None:
-        return None
-    result = {}
-    for key in ("first_place", "last_place"):
-        entry = evidence.get(key)
-        if entry is None:
-            result[key] = None
-            continue
-        result[key] = {
-            "product_id": entry.get("product_id"),
-            "quote": filter_quote_for_blueprint(entry.get("quote")),
-        }
-    return result
-
+# ── Blueprint Designer Profile ──────────────────────────────────────────────
 
 def filter_for_blueprint(data: dict) -> dict:
     """
-    category_analysis.json → category_blueprint.json 축소본 생성.
+    category_analysis.json -> category_blueprint.json 축소본 생성.
 
     포함 필드:
     - product_count (동적 블록 캡 결정)
@@ -193,16 +172,28 @@ def filter_for_blueprint(data: dict) -> dict:
             for r in theme.get("rankings", [])
         ]
 
-        # contradiction_pairs: quote 메타 축소
+        # contradiction_pairs: 범용 함수로 quote 메타 축소
         filtered_theme["contradiction_pairs"] = [
-            filter_contradiction_pair_for_blueprint(pair)
+            _filter_contradiction_pair(pair, "blueprint")
             for pair in theme.get("contradiction_pairs", [])
         ]
 
         # best_evidence: quote 메타 축소
-        filtered_theme["best_evidence"] = filter_best_evidence_for_blueprint(
-            theme.get("best_evidence")
-        )
+        be = theme.get("best_evidence")
+        if be is None:
+            filtered_theme["best_evidence"] = None
+        else:
+            filtered_be = {}
+            for key in ("first_place", "last_place"):
+                entry = be.get(key)
+                if entry is None:
+                    filtered_be[key] = None
+                else:
+                    filtered_be[key] = {
+                        "product_id": entry.get("product_id"),
+                        "quote": _filter_quote(entry.get("quote"), "blueprint"),
+                    }
+            filtered_theme["best_evidence"] = filtered_be
 
         result["common_themes"].append(filtered_theme)
 
@@ -216,80 +207,42 @@ def filter_for_blueprint(data: dict) -> dict:
             "mention_count": us.get("mention_count"),
             "why_unique": us.get("why_unique"),
             "recommended_use_case": us.get("recommended_use_case"),
-            "best_quote": filter_quote_for_blueprint(us.get("best_quote")),
+            "best_quote": _filter_quote(us.get("best_quote"), "blueprint"),
         }
         result["unique_strengths"].append(filtered_us)
 
     # ── category_intelligence: 전체 유지 (Verdict 전략에 필수) ──
     result["category_intelligence"] = data.get("category_intelligence")
+    if "analyst_notebook" in data:
+        result["analyst_notebook"] = data["analyst_notebook"]
 
     return result
 
 
-# ── Tone Editor Profile ─────────────────────────────────────────────────────
+# ── Screen Profile ───────────────────────────────────────────────────────
+# Data Screener Agent용 축소본 — quote 본문 불필요, 통계 메타데이터만 추출.
+# 판단 기준은 ratio_gap과 mention_count.
 
-def filter_quote_for_tone(quote: dict) -> dict:
+def filter_for_screen(data: dict) -> dict:
     """
-    contradiction_pairs 내부의 quote 객체에서 Tone Editor에 필요한 필드만 추출.
-    - is_humorous: 유머 후보 검색 (CHECK 4)
-    - product_id: 유머 제품별 배분 확인 (CHECK 4)
-    - 나머지 (text, star_rating, review_date, helpful_count, media_info 등): 제거
-    """
-    if quote is None:
-        return None
-    return {
-        "is_humorous": quote.get("is_humorous", False),
-        "product_id": quote.get("product_id"),
-    }
-
-
-def filter_contradiction_pair_for_tone(pair: dict) -> dict:
-    """
-    contradiction_pairs 항목에서 Tone Editor에 필요한 필드만 추출.
-    - type: 모순 유형 (within_product / cross_product) — BGM Contrast 전략용
-    - product_id / product_ids: 제품 식별
-    - positive_quote / negative_quote: is_humorous + product_id만 유지
-    - resolution_hypothesis: 제거 (Writer/DV 영역)
-    """
-    result = {
-        "type": pair.get("type"),
-    }
-
-    # within_product이면 product_id, cross_product이면 product_ids 사용
-    if pair.get("type") == "within_product":
-        result["product_id"] = pair.get("product_id")
-    else:
-        result["product_ids"] = pair.get("product_ids")
-
-    # quote에서 is_humorous + product_id만 추출
-    result["positive_quote"] = filter_quote_for_tone(pair.get("positive_quote"))
-    result["negative_quote"] = filter_quote_for_tone(pair.get("negative_quote"))
-
-    return result
-
-
-def filter_for_tone_editor(data: dict) -> dict:
-    """
-    category_analysis.json → category_tone_editor.json 축소본 생성.
+    category_candidates.json -> category_screen.json 축소본 생성.
+    Data Screener Agent의 editorial judgment에 필요한 통계 메타데이터만 보존.
 
     포함 필드:
-    - common_themes[]: theme_name, category_pattern_type, rankings(product_id만),
-      contradiction_pairs(type, product_id, is_humorous만)
-    - unique_strengths[]: product_id, theme_name만
-    - category_intelligence: maturity_assessment, universal_weaknesses만
+    - common_themes[]: theme_name, category_pattern_type,
+      rankings (product_id, product_name, mention_count, positive_ratio),
+      contradiction_pairs (type, product_id/product_ids, ratio_gap)
+    - unique_strengths[]: product_id, theme_name, positive_ratio,
+      mention_count, ratio_gap
 
     제거 필드:
-    - category_name, product_count, dataset_snapshot, previous_snapshot, delta, products[]
-    - common_themes[].category_pattern (자연어 설명)
-    - common_themes[].rankings[]의 mention_count, positive_count 등 수치 필드
-    - common_themes[].best_evidence 전체
-    - contradiction_pairs 내 quote의 text, star_rating, review_date 등
-    - unique_strengths[]의 positive_ratio, mention_count, why_unique 등
-    - category_intelligence의 universal_strengths, buy_in_category, avoid_category
+    - products[], category_name, product_count, dataset_snapshot
+    - quote 본문 전체 (text, review_id, star_rating 등)
+    - best_evidence, resolution_hypothesis, category_intelligence
     """
     result = {}
 
-    # ── common_themes 축소 ──
+    # ── common_themes: 통계 메타만 유지 ──
     result["common_themes"] = []
     for theme in data.get("common_themes", []):
         filtered_theme = {
@@ -297,141 +250,71 @@ def filter_for_tone_editor(data: dict) -> dict:
             "category_pattern_type": theme.get("category_pattern_type"),
         }
 
-        # rankings: product_id만 유지
+        # rankings: mention_count + positive_ratio (통계 신뢰도 판단용)
         filtered_theme["rankings"] = [
-            {"product_id": r.get("product_id")}
+            {
+                "product_id": r.get("product_id"),
+                "product_name": r.get("product_name"),
+                "mention_count": r.get("mention_count"),
+                "positive_ratio": r.get("positive_ratio"),
+            }
             for r in theme.get("rankings", [])
         ]
 
-        # contradiction_pairs: type, product_id, is_humorous만 유지
-        filtered_theme["contradiction_pairs"] = [
-            filter_contradiction_pair_for_tone(pair)
-            for pair in theme.get("contradiction_pairs", [])
-        ]
-
-        # best_evidence: 완전 제거 (Tone Editor 불필요)
+        # contradiction_pairs: type + product_ids + ratio_gap만 (quote 본문 완전 제거)
+        filtered_theme["contradiction_pairs"] = []
+        for pair in theme.get("contradiction_pairs", []):
+            fp = {"type": pair.get("type")}
+            if pair.get("type") == "within_product":
+                fp["product_id"] = pair.get("product_id")
+            else:
+                fp["product_ids"] = pair.get("product_ids")
+                fp["ratio_gap"] = pair.get("ratio_gap")
+            filtered_theme["contradiction_pairs"].append(fp)
 
         result["common_themes"].append(filtered_theme)
 
-    # ── unique_strengths 축소 ──
+    # ── unique_strengths: 통계 메타만 유지 ──
     result["unique_strengths"] = [
         {
             "product_id": us.get("product_id"),
             "theme_name": us.get("theme_name"),
+            "positive_ratio": us.get("positive_ratio"),
+            "mention_count": us.get("mention_count"),
+            "ratio_gap": us.get("ratio_gap"),
         }
         for us in data.get("unique_strengths", [])
     ]
 
-    # ── category_intelligence 축소 ──
-    ci = data.get("category_intelligence", {})
-    result["category_intelligence"] = {
-        "maturity_assessment": ci.get("maturity_assessment"),
-        "universal_weaknesses": ci.get("universal_weaknesses", []),
-    }
-
     return result
 
 
-# ── Structure Engineer Profile ───────────────────────────────────────────────
-# comparison_blueprint.json의 selected_themes를 기준으로 필요한 테마만 추출.
-# Blueprint가 이미 제공한 정보(best_evidence, unique_strengths, narrative_directive)는 제거.
+# ── Intelligence Profile ─────────────────────────────────────────────────
+# Category Analyst Agent용 축소본 — category_pattern, resolution_hypothesis,
+# why_unique, category_intelligence 작성에 필요한 컨텍스트 보존.
 
-DEFAULT_BLUEPRINT = os.path.join("data", "comparison_blueprint.json")
-
-
-def _load_selected_theme_names(blueprint_path: str) -> list[str]:
+def filter_for_intelligence(data: dict) -> dict:
     """
-    comparison_blueprint.json에서 selected_themes[].theme_name 목록 추출.
-    Structure Engineer가 참조해야 할 테마만 필터링하는 기준.
-    """
-    if not os.path.exists(blueprint_path):
-        print(json.dumps({"error": f"Blueprint not found: {blueprint_path}"}),
-              file=sys.stderr)
-        sys.exit(1)
-
-    with open(blueprint_path, "r", encoding="utf-8") as f:
-        bp = json.load(f)
-
-    return [t["theme_name"] for t in bp.get("selected_themes", [])]
-
-
-def filter_quote_for_structure(quote: dict) -> dict:
-    """
-    Structure Engineer용 quote 극소화.
-    보존: text (notes에 quote reference 작성용), review_id, product_id
-    제거: sentiment, star_rating, review_date, helpful_count,
-          is_humorous, selection_reason, has_media, media_info
-    → quote 1개당 약 60-70% 토큰 절감
-    """
-    if quote is None:
-        return None
-    return {
-        "text": quote.get("text"),
-        "review_id": quote.get("review_id"),
-        "product_id": quote.get("product_id"),
-    }
-
-
-def filter_contradiction_pair_for_structure(pair: dict) -> dict:
-    """
-    Structure Engineer용 contradiction_pair 축소.
-    보존: type, product_id/product_ids, quote(text+review_id+product_id만),
-          resolution_hypothesis
-    제거: quote 메타데이터 전체
-    """
-    result = {
-        "type": pair.get("type"),
-    }
-    if pair.get("type") == "within_product":
-        result["product_id"] = pair.get("product_id")
-    else:
-        result["product_ids"] = pair.get("product_ids")
-
-    result["positive_quote"] = filter_quote_for_structure(pair.get("positive_quote"))
-    result["negative_quote"] = filter_quote_for_structure(pair.get("negative_quote"))
-    result["resolution_hypothesis"] = pair.get("resolution_hypothesis")
-
-    return result
-
-
-def filter_for_structure_engineer(data: dict, blueprint_path: str = None) -> dict:
-    """
-    category_analysis.json → category_structure_engineer.json 축소본 생성.
-
-    핵심 전략: comparison_blueprint.json의 selected_themes 목록을 기준으로
-    해당 테마만 필터링하여 불필요한 excluded 테마 데이터를 완전 제거.
+    category_screened.json -> category_intelligence.json 축소본 생성.
+    Category Analyst Agent의 qualitative writing에 필요한 데이터 보존.
 
     포함 필드:
-    - product_count (블록 캡 검증)
-    - products[]: product_id, product_name, sold_last_month,
-      all_time_rating_avg, recent_review_rating_avg, population_gap,
-      trap_candidate (Overview/Verdict notes 작성에 필요)
-    - common_themes[] (selected_themes만): theme_name, category_pattern_type,
-      rankings (positive_ratio 기반 leader/laggard 식별),
-      contradiction_pairs (축소된 quote)
-    - category_intelligence: 전체 (Verdict notes에 필요)
+    - products[]: product_id, product_name, sold_last_month, all_time_rating_avg,
+      recent_review_rating_avg, population_gap, trap_candidate,
+      needs_narrative_anchor, within_contradiction_themes
+    - common_themes[]: theme_name, category_pattern_type,
+      rankings (전체 통계), contradiction_pairs (quote text 보존)
+    - unique_strengths[]: product_id, theme_name, positive_ratio, mention_count,
+      is_exclusive_feature, best_quote (text 보존)
 
     제거 필드:
-    - excluded 테마의 전체 데이터
-    - category_name, dataset_snapshot, previous_snapshot, delta
-    - products[].product_category, summary_path, recent_period_text, recent_days,
-      all_time_rating_count, recent_review_count, reviews_analyzed_count
-    - common_themes[].category_pattern (자연어 설명 — Structure에 불필요)
-    - common_themes[].best_evidence 전체 (Blueprint narrative_directive에 이미 포함)
-    - contradiction_pairs 내 quote 메타 대부분
-    - unique_strengths 전체 (Blueprint standout_mapping에 이미 포함)
+    - category_name, product_count, dataset_snapshot
+    - quote의 review_date, helpful_count, has_media, media_info, selection_reason
+    - best_evidence (Analyst가 직접 데이터에서 패턴 도출)
     """
-    # Blueprint에서 선택된 테마명 로드
-    bp_path = blueprint_path or DEFAULT_BLUEPRINT
-    selected_names = _load_selected_theme_names(bp_path)
-    selected_set = set(selected_names)
-
     result = {}
 
-    # ── product_count ──
-    result["product_count"] = data.get("product_count")
-
-    # ── products 축소: Structure Engineer에 필요한 필드만 ──
+    # ── products: narrative_anchor 체크 + maturity_assessment 작성에 필요 ──
     result["products"] = []
     for p in data.get("products", []):
         result["products"].append({
@@ -442,45 +325,51 @@ def filter_for_structure_engineer(data: dict, blueprint_path: str = None) -> dic
             "recent_review_rating_avg": p.get("recent_review_rating_avg"),
             "population_gap": p.get("population_gap"),
             "trap_candidate": p.get("trap_candidate"),
+            "needs_narrative_anchor": p.get("needs_narrative_anchor", False),
+            "within_contradiction_themes": p.get("within_contradiction_themes", []),
         })
 
-    # ── common_themes: selected_themes에 해당하는 것만 필터링 ──
+    # ── common_themes: rankings 전체 + contradiction_pairs (quote text 보존) ──
     result["common_themes"] = []
     for theme in data.get("common_themes", []):
-        if theme.get("theme_name") not in selected_set:
-            continue  # excluded 테마 완전 스킵
-
         filtered_theme = {
             "theme_name": theme.get("theme_name"),
             "category_pattern_type": theme.get("category_pattern_type"),
         }
 
-        # rankings: 수치 필드만 유지 (leader/laggard 식별 + notes 작성)
+        # rankings: 전체 통계 유지 (category_pattern 판단에 필수)
         filtered_theme["rankings"] = [
             {
                 "product_id": r.get("product_id"),
                 "product_name": r.get("product_name"),
                 "mention_count": r.get("mention_count"),
+                "positive_count": r.get("positive_count"),
+                "negative_count": r.get("negative_count"),
                 "positive_ratio": r.get("positive_ratio"),
-                "insight_level": r.get("insight_level"),
             }
             for r in theme.get("rankings", [])
         ]
 
-        # contradiction_pairs: quote 극소화 (text + review_id + product_id)
+        # contradiction_pairs: 범용 함수로 quote text 보존 (hypothesis 작성에 맥락 필요)
+        # intelligence 프로파일은 resolution_hypothesis가 아직 빈 상태이므로 범용 함수 사용
         filtered_theme["contradiction_pairs"] = [
-            filter_contradiction_pair_for_structure(pair)
+            _filter_contradiction_pair(pair, "intelligence")
             for pair in theme.get("contradiction_pairs", [])
         ]
 
-        # best_evidence: 완전 제거 (Blueprint narrative_directive에 이미 포함)
-
         result["common_themes"].append(filtered_theme)
 
-    # ── unique_strengths: 완전 제거 (Blueprint standout_mapping에 이미 포함) ──
-
-    # ── category_intelligence: 전체 유지 (Verdict notes에 필수) ──
-    result["category_intelligence"] = data.get("category_intelligence")
+    # ── unique_strengths: is_exclusive_feature + best_quote text 보존 ──
+    result["unique_strengths"] = []
+    for us in data.get("unique_strengths", []):
+        result["unique_strengths"].append({
+            "product_id": us.get("product_id"),
+            "theme_name": us.get("theme_name"),
+            "positive_ratio": us.get("positive_ratio"),
+            "mention_count": us.get("mention_count"),
+            "is_exclusive_feature": us.get("is_exclusive_feature", False),
+            "best_quote": _filter_quote(us.get("best_quote"), "intelligence"),
+        })
 
     return result
 
@@ -512,47 +401,6 @@ def _load_assigned_theme_names(outline_path: str) -> list[str]:
     return list(themes)
 
 
-def filter_quote_for_writer(quote: dict) -> dict:
-    """
-    Writer Agent용 quote 축소.
-    보존: text (highlight_phrase 추출 필수), review_id, product_id,
-          star_rating, is_humorous, selection_reason, sentiment
-    제거: review_date, helpful_count, has_media, media_info
-    -> quote 1개당 약 30-35% 토큰 절감
-    """
-    if quote is None:
-        return None
-    return {
-        "text": quote.get("text"),
-        "review_id": quote.get("review_id"),
-        "product_id": quote.get("product_id"),
-        "star_rating": quote.get("star_rating"),
-        "sentiment": quote.get("sentiment"),
-        "is_humorous": quote.get("is_humorous", False),
-        "selection_reason": quote.get("selection_reason"),
-    }
-
-
-def filter_contradiction_pair_for_writer(pair: dict) -> dict:
-    """
-    Writer Agent용 contradiction_pair 축소.
-    보존: type, product_id/product_ids, quote(text+핵심 메타), resolution_hypothesis
-    """
-    result = {
-        "type": pair.get("type"),
-    }
-    if pair.get("type") == "within_product":
-        result["product_id"] = pair.get("product_id")
-    else:
-        result["product_ids"] = pair.get("product_ids")
-
-    result["positive_quote"] = filter_quote_for_writer(pair.get("positive_quote"))
-    result["negative_quote"] = filter_quote_for_writer(pair.get("negative_quote"))
-    result["resolution_hypothesis"] = pair.get("resolution_hypothesis")
-
-    return result
-
-
 def filter_for_writer(data: dict, outline_path: str = None) -> dict:
     """
     category_analysis.json -> category_writer.json 축소본 생성.
@@ -575,7 +423,8 @@ def filter_for_writer(data: dict, outline_path: str = None) -> dict:
 
     제거 필드:
     - dataset_snapshot, previous_snapshot, delta, product_count
-    - products[].product_category, summary_path, recent_period_text, recent_days
+    - products[].product_category, summary_path, recent_period_text
+
     - products[].trap_candidate.signals
     - excluded 테마의 전체 데이터
     - rankings[].rank, insight_level (순위 노출 금지 원칙)
@@ -602,6 +451,7 @@ def filter_for_writer(data: dict, outline_path: str = None) -> dict:
             "all_time_rating_count": p.get("all_time_rating_count"),
             "recent_review_rating_avg": p.get("recent_review_rating_avg"),
             "recent_review_count": p.get("recent_review_count"),
+            "recent_days": p.get("recent_days"),
             "population_gap": p.get("population_gap"),
             "reviews_analyzed_count": p.get("reviews_analyzed_count"),
             "trap_candidate": {
@@ -635,9 +485,9 @@ def filter_for_writer(data: dict, outline_path: str = None) -> dict:
             for r in theme.get("rankings", [])
         ]
 
-        # contradiction_pairs: quote text 보존, 불필요 메타 제거
+        # contradiction_pairs: 범용 함수로 quote text 보존, 불필요 메타 제거
         filtered_theme["contradiction_pairs"] = [
-            filter_contradiction_pair_for_writer(pair)
+            _filter_contradiction_pair(pair, "writer")
             for pair in theme.get("contradiction_pairs", [])
         ]
 
@@ -650,7 +500,7 @@ def filter_for_writer(data: dict, outline_path: str = None) -> dict:
                 if entry:
                     filtered_be[key] = {
                         "product_id": entry.get("product_id"),
-                        "quote": filter_quote_for_writer(entry.get("quote")),
+                        "quote": _filter_quote(entry.get("quote"), "writer"),
                     }
             filtered_theme["best_evidence"] = filtered_be
 
@@ -666,56 +516,18 @@ def filter_for_writer(data: dict, outline_path: str = None) -> dict:
             "mention_count": us.get("mention_count"),
             "why_unique": us.get("why_unique"),
             "recommended_use_case": us.get("recommended_use_case"),
-            "best_quote": filter_quote_for_writer(us.get("best_quote")),
+            "best_quote": _filter_quote(us.get("best_quote"), "writer"),
         })
 
     # ── category_intelligence: 전체 유지 (Verdict에 필수) ──
     result["category_intelligence"] = data.get("category_intelligence")
+    if "analyst_notebook" in data:
+        result["analyst_notebook"] = data["analyst_notebook"]
 
     return result
 
 
 # ── Validator Profile ───────────────────────────────────────────────────────
-
-def filter_quote_for_validator(quote: dict) -> dict:
-    """
-    Data Validator용 quote 축소.
-    보존: text (highlight_phrase 검증용), review_id, product_id,
-          star_rating, review_date, helpful_count, selection_reason, is_humorous
-    제거: sentiment, has_media, media_info
-    """
-    if quote is None:
-        return None
-    return {
-        "text": quote.get("text"),
-        "review_id": quote.get("review_id"),
-        "product_id": quote.get("product_id"),
-        "star_rating": quote.get("star_rating"),
-        "review_date": quote.get("review_date"),
-        "helpful_count": quote.get("helpful_count"),
-        "selection_reason": quote.get("selection_reason"),
-        "is_humorous": quote.get("is_humorous", False),
-    }
-
-
-def filter_contradiction_pair_for_validator(pair: dict) -> dict:
-    """
-    Data Validator용 contradiction_pair 축소.
-    """
-    result = {
-        "type": pair.get("type"),
-    }
-    if pair.get("type") == "within_product":
-        result["product_id"] = pair.get("product_id")
-    else:
-        result["product_ids"] = pair.get("product_ids")
-
-    result["positive_quote"] = filter_quote_for_validator(pair.get("positive_quote"))
-    result["negative_quote"] = filter_quote_for_validator(pair.get("negative_quote"))
-    result["resolution_hypothesis"] = pair.get("resolution_hypothesis")
-
-    return result
-
 
 def filter_for_validator(data: dict) -> dict:
     """
@@ -765,7 +577,7 @@ def filter_for_validator(data: dict) -> dict:
         ]
 
         filtered_theme["contradiction_pairs"] = [
-            filter_contradiction_pair_for_validator(pair)
+            _filter_contradiction_pair(pair, "validator")
             for pair in theme.get("contradiction_pairs", [])
         ]
 
@@ -777,7 +589,7 @@ def filter_for_validator(data: dict) -> dict:
                 if entry:
                     filtered_be[key] = {
                         "product_id": entry.get("product_id"),
-                        "quote": filter_quote_for_validator(entry.get("quote")),
+                        "quote": _filter_quote(entry.get("quote"), "validator"),
                     }
             filtered_theme["best_evidence"] = filtered_be
 
@@ -791,11 +603,13 @@ def filter_for_validator(data: dict) -> dict:
             "positive_ratio": us.get("positive_ratio"),
             "mention_count": us.get("mention_count"),
             "why_unique": us.get("why_unique"),
-            "best_quote": filter_quote_for_validator(us.get("best_quote")),
+            "best_quote": _filter_quote(us.get("best_quote"), "validator"),
         })
 
     # category_intelligence 전체 유지 (문맥 파악 및 수치 존재 가능성)
     result["category_intelligence"] = data.get("category_intelligence")
+    if "analyst_notebook" in data:
+        result["analyst_notebook"] = data["analyst_notebook"]
 
     return result
 
@@ -803,8 +617,8 @@ def filter_for_validator(data: dict) -> dict:
 # ── 프로파일 -> 필터 함수 매핑 ───────────────────────────────────────────────
 FILTER_FUNCTIONS = {
     "blueprint": filter_for_blueprint,
-    "tone_editor": filter_for_tone_editor,
-    "structure_engineer": filter_for_structure_engineer,
+    "screen": filter_for_screen,
+    "intelligence": filter_for_intelligence,
     "writer": filter_for_writer,
     "validator": filter_for_validator,
 }
@@ -825,11 +639,6 @@ def main():
     parser.add_argument(
         "--output", default=None,
         help="출력 경로 (기본: data/category_{profile}.json)"
-    )
-    parser.add_argument(
-        "--blueprint", default=DEFAULT_BLUEPRINT,
-        help=f"comparison_blueprint.json 경로 (structure_engineer 프로파일 전용, "
-             f"기본: {DEFAULT_BLUEPRINT})"
     )
     parser.add_argument(
         "--outline", default=DEFAULT_OUTLINE,
@@ -854,11 +663,8 @@ def main():
 
     # 프로파일별 필터 적용
     filter_fn = FILTER_FUNCTIONS[args.profile]
-    # structure_engineer 프로파일은 blueprint_path 인자가 필요
-    if args.profile == "structure_engineer":
-        filtered = filter_fn(data, blueprint_path=args.blueprint)
     # writer 프로파일은 outline_path 인자가 필요
-    elif args.profile == "writer":
+    if args.profile == "writer":
         filtered = filter_fn(data, outline_path=args.outline)
     else:
         filtered = filter_fn(data)

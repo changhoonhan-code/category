@@ -18,7 +18,8 @@ BLOCK_WIDTH = 1024
 BLOCK_MARGIN_LEFT = 20
 SCALE_FACTOR = 1.0
 
-BG_COLOR = (255, 255, 255)
+# 배경을 투명하게 처리하기 위해 Alpha 값을 0으로 설정 (RGBA 모드 사용)
+BG_COLOR = (255, 255, 255, 0)
 TEXT_BLACK = (15, 17, 17)        # 일반 리뷰 텍스트, 이름, 제목
 TEXT_DARK_GREY = (86, 89, 89)    # 날짜, 장소, Report 등
 TEXT_LIGHT_GREY = (200, 200, 200)# 파이프(|) 구분선 색상
@@ -209,19 +210,32 @@ def draw_single_review(review_id, soup, image, draw, start_y, highlight_phrase=N
     name_y = current_y + (pfp_size - 14) // 2 
     draw.text((name_x, name_y), reviewer_name, font=font_name, fill=TEXT_BLACK)
     
-    # 텍스트가 그려진 영역을 잘라내어 모자이크 처리
-    name_w = int(font_name.getlength(reviewer_name))
-    name_h = 24 # 폰트 사이즈(14)를 여유있게 커버할 높이
-    
-    if name_w > 0:
-        text_bbox = (name_x, name_y - 4, name_x + name_w, name_y - 4 + name_h)
-        text_crop = image.crop(text_bbox)
+    # 텍스트가 그려진 영역을 잘라내어 모자이크 처리 (해상도 반응형)
+    text_bbox_rel = font_name.getbbox(reviewer_name)
+    if text_bbox_rel:
+        rel_left, rel_top, rel_right, rel_bottom = text_bbox_rel
+        name_w = rel_right - rel_left
+        name_h = rel_bottom - rel_top
         
-        t_mosaic = 2.5 # 텍스트 모자이크 강도 (숫자가 클수록 픽셀이 큼, 작게 하려면 2~3 추천)
-        small_txt = text_crop.resize((max(1, int(name_w / t_mosaic)), max(1, int(name_h / t_mosaic))), Image.Resampling.NEAREST)
-        pixelated_txt = small_txt.resize((name_w, name_h), Image.Resampling.NEAREST)
-        
-        image.paste(pixelated_txt, (name_x, name_y - 4))
+        if name_w > 0 and name_h > 0:
+            # 렌더링 시 위아래 여백을 보장하기 위해 크롭 영역에 패딩 추가
+            pad_y = 6
+            crop_x1 = int(name_x + rel_left)
+            crop_y1 = int(name_y + rel_top - pad_y)
+            crop_x2 = int(name_x + rel_right)
+            crop_y2 = int(name_y + rel_bottom + pad_y)
+            
+            crop_w = crop_x2 - crop_x1
+            crop_h = crop_y2 - crop_y1
+            
+            text_bbox = (crop_x1, crop_y1, crop_x2, crop_y2)
+            text_crop = image.crop(text_bbox)
+            
+            t_mosaic = 2.5 # 텍스트 모자이크 강도 (숫자가 클수록 픽셀이 큼, 작게 하려면 2~3 추천)
+            small_txt = text_crop.resize((max(1, int(crop_w / t_mosaic)), max(1, int(crop_h / t_mosaic))), Image.Resampling.NEAREST)
+            pixelated_txt = small_txt.resize((crop_w, crop_h), Image.Resampling.NEAREST)
+            
+            image.paste(pixelated_txt, (crop_x1, crop_y1))
 
     current_y += pfp_size + 8
     
@@ -368,26 +382,56 @@ def draw_single_review(review_id, soup, image, draw, start_y, highlight_phrase=N
         
     current_y += 12
     
-    # --- Image Thumbnails (로컬 폴더에서 오프라인 로드) ---
-    media_pattern = os.path.join(INPUT_DIR, "photos", f"{review_id}_*.jpg")
-    image_files = sorted(glob.glob(media_pattern))
+    # --- Image Thumbnails (HTML 파싱 + 로컬 폴더 지원) ---
+    thumbnail_bboxes_px = []
+    
+    # 다중 제품 폴더 구조 (products/product_a 등) 전체에서 로컬 썸네일 재귀 탐색
+    media_pattern = os.path.join(DATAS_DIR, "products", "*", "**", f"{review_id}_*.jpg")
+    image_files = sorted(glob.glob(media_pattern, recursive=True))
     
     thumbs = []
-    thumb_size = 80
+    thumb_h = 81
+    
+    # 로컬 파일이 있으면 로컬부터 로드
     if image_files:
         for f in image_files[:10]:
             try:
                 img_raw = Image.open(f).convert("RGB")
-                thumbs.append(ImageOps.fit(img_raw, (thumb_size, thumb_size), Image.Resampling.LANCZOS))
+                orig_w, orig_h = img_raw.size
+                if orig_h > 0:
+                    new_w = max(1, int(orig_w * (thumb_h / orig_h)))
+                    img_resized = img_raw.resize((new_w, thumb_h), Image.Resampling.LANCZOS)
+                    thumbs.append(img_resized)
             except: pass
-            
-        if thumbs:
-            tx = margin_x
-            ty = current_y
-            for t in thumbs:
-                image.paste(t, (tx, ty))
-                tx += t.width + 8
-            current_y += thumb_size + 24
+    else:
+        # 로컬(Photos)에 없으면 DB에 저장된 HTML에서 썸네일 URL을 파싱하여 온라인(혹은 캐시)에서 로드
+        image_urls = []
+        for img in soup.find_all('img'):
+            classes = img.get('class', [])
+            if classes and 'review-image-tile' in classes:
+                src = img.get('src')
+                if src:
+                    image_urls.append(src)
+                    
+        for url in image_urls[:10]:
+            img_raw = get_cached_image(url)
+            if img_raw:
+                try:
+                    orig_w, orig_h = img_raw.size
+                    if orig_h > 0:
+                        new_w = max(1, int(orig_w * (thumb_h / orig_h)))
+                        img_resized = img_raw.resize((new_w, thumb_h), Image.Resampling.LANCZOS)
+                        thumbs.append(img_resized)
+                except: pass
+
+    if thumbs:
+        tx = margin_x
+        ty = current_y
+        for t in thumbs:
+            image.paste(t, (tx, ty))
+            thumbnail_bboxes_px.append([tx, ty, t.width, t.height])
+            tx += t.width + 8
+        current_y += thumb_h + 24
     else:
         current_y += 10 
 
@@ -414,8 +458,8 @@ def draw_single_review(review_id, soup, image, draw, start_y, highlight_phrase=N
     
     current_y += bx_h + 30
     
-    # 개별 렌더링 종료: 현재 Y값과 추출된 픽셀 기반 BBox를 반환
-    return current_y, highlight_bboxes_px
+    # 개별 렌더링 종료: 현재 Y값과 추출된 텍스트/썸네일 기준 픽셀 기반 BBox를 반환
+    return current_y, highlight_bboxes_px, thumbnail_bboxes_px
 
 def generate_combined_review_card(block_id: str, quotes: list, output_dir: str = None) -> dict:
     """블록 내 여러 리뷰를 수직으로 이어붙이고 통합된 정규화 좌표계를 리턴하는 API."""
@@ -426,10 +470,11 @@ def generate_combined_review_card(block_id: str, quotes: list, output_dir: str =
         output_dir = os.path.join(DATAS_DIR, "review_cards")
     os.makedirs(output_dir, exist_ok=True)
     
-    output_path = os.path.join(output_dir, f"card_combined_{block_id}.png")
+    output_path = os.path.join(output_dir, f"card_combined_{block_id}.webp")
     
-    MAX_HEIGHT = 8000
-    image = Image.new("RGB", (BASE_WIDTH, MAX_HEIGHT), BG_COLOR)
+    MAX_HEIGHT = 20000
+    # 리뷰 카드의 배경을 투명하게 만들기 위해 이미지 모드를 'RGB'에서 'RGBA'로 변경
+    image = Image.new("RGBA", (BASE_WIDTH, MAX_HEIGHT), BG_COLOR)
     draw = ImageDraw.Draw(image)
     
     current_y = 20
@@ -438,6 +483,7 @@ def generate_combined_review_card(block_id: str, quotes: list, output_dir: str =
     for quote in quotes:
         r_id = quote.get("review_id")
         h_phrase = quote.get("highlight_phrase")
+        b_id = quote.get("block_id")
         
         if not r_id:
             continue
@@ -450,12 +496,14 @@ def generate_combined_review_card(block_id: str, quotes: list, output_dir: str =
         soup = BeautifulSoup(html_snippet, 'html.parser')
         
         # Draw the single review onto the shared canvas
-        new_y, highlight_bboxes_px = draw_single_review(r_id, soup, image, draw, current_y, h_phrase)
+        new_y, highlight_bboxes_px, thumbnail_bboxes_px = draw_single_review(r_id, soup, image, draw, current_y, h_phrase)
         
         # Save px bboxes to normalize later
         all_quotes_data.append({
             "review_id": r_id,
-            "bboxes_px": highlight_bboxes_px
+            "block_id": b_id,
+            "bboxes_px": highlight_bboxes_px,
+            "thumb_bboxes_px": thumbnail_bboxes_px
         })
         
         # Add gap for next review
@@ -468,7 +516,8 @@ def generate_combined_review_card(block_id: str, quotes: list, output_dir: str =
         
     # 최종 자르기도 원본 이미지 사이즈(1920)를 기준으로 수행
     final_image = image.crop((0, 0, BASE_WIDTH, final_height))
-    final_image.save(output_path)
+    # 이미지 용량 최적화를 위해 WebP 포맷을 사용하되, 텍스트가 뭉개지지 않도록 무손실(lossless)로 저장
+    final_image.save(output_path, format="WEBP", lossless=True, quality=100, method=6)
     
     # Bboxes를 픽셀 단위(x1, y1, x2, y2)로 리턴
     # 원본 이미지의 좌측 상단 모서리를 (0,0) 기준으로 한 절대 픽셀 좌표
@@ -491,9 +540,27 @@ def generate_combined_review_card(block_id: str, quotes: list, output_dir: str =
                 "y2": y2
             })
             
+        thumb_bboxes = []
+        for box in q_data["thumb_bboxes_px"]:
+            tx, ty, tw, th = box
+            
+            x1 = int(round(tx))
+            y1 = int(round(ty))
+            x2 = int(round(tx + tw))
+            y2 = int(round(ty + th))
+            
+            thumb_bboxes.append({
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2
+            })
+            
         quotes_output.append({
             "review_id": q_data["review_id"],
-            "highlight_bboxes": pixel_bboxes
+            "block_id": q_data.get("block_id"),
+            "highlight_bboxes": pixel_bboxes,
+            "thumbnail_bboxes": thumb_bboxes
         })
 
     return {
@@ -542,7 +609,7 @@ def main(review_ids=None):
         except:
             review_id = f"idx_{idx}"
             
-        out_file = os.path.join(output_dir, f"card_{review_id}.png")
+        out_file = os.path.join(output_dir, f"card_{review_id}.webp")
         
         # 1. DB에서 HTML 질의
         html_snippet = get_html_from_db(review_id)
