@@ -24,14 +24,6 @@ Verify the existence of the following files:
 
 ## Execution Procedure
 
-### Step 0: Screen Data Injection
-
-Inject chart data and numerical statistics into the script for visual graphics generation. This must run before any B-roll mapping.
-
-```bash
-python tools/inject_screen_data.py
-```
-
 ### Step 1: B-roll Pipeline (`/broll`)
 
 Run the B-roll & Visual Media Agent. The agent executes all 6 steps defined in `reviewlens_broll_agent/SKILL.md`:

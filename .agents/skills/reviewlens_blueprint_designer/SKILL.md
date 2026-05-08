@@ -11,7 +11,8 @@ description: Strategic decisions for category comparison analysis — theme cura
 >
 > **Your Field Ownership**: `video_question`, theme selection, Hook contradiction choice, `narrative_directive`, `narrative_weight`, Landmine mapping, Final Recommendation strategy, `excluded_themes`
 >
-> **You MUST NOT decide**: Scene order, block count, block_pacing, teaser_payoff_map — these belong to `build_outline.py`
+> **You MUST NOT decide**: block count, block_pacing, teaser_payoff_map — these belong to `build_outline.py`
+> **You DO decide**: The order of `selected_themes` — this array order becomes the scene order in the final video
 >
 > **Authority references (precision loading — read ONLY the specified sections)**:
 >
@@ -117,6 +118,21 @@ Do not filter mechanically by numbers alone. Apply comprehensive judgment using 
 4. **Contradiction availability**: Themes with `contradiction_pairs` have rich data narratives
 5. **Hook connection**: The theme that serves as payoff for the Hook contradiction MUST be included
 6. **Evidence richness**: Quality and quantity of `best_evidence.first_place`/`last_place` quotes
+
+### Theme Ordering (Energy Curve)
+
+The `selected_themes` array order IS the scene order in the final video. `build_outline.py` preserves this order verbatim, and `render_writer_brief.py` presents the Data Library sections in this order — which directly influences how the Writer structures the draft.
+
+**Ordering rules**:
+
+1. **Position 1**: The Hook payoff theme (the theme resolving the Hook contradiction). This is mandatory — viewers who clicked for the Hook expect an early answer
+2. **No consecutive `universal_weakness`**: Back-to-back "nobody wins" chapters create a sustained low-energy dip that kills viewer retention. Always place at least one `differentiator` (clear winner/loser = high energy) between two `universal_weakness` themes
+3. **Last position preference**: If possible, the last metric chapter before the Verdict should be a `differentiator`. A chapter with a clear winner/loser gives the script forward momentum into the Verdict. A `universal_weakness` ending lets energy fade before the conclusion
+4. **Interleave pattern types**: When you have 3+ differentiators and 2+ universal_weakness themes, distribute the uw themes between diff themes rather than clustering them at the end
+
+Document your ordering rationale in the `ordering_rationale` field.
+
+> `build_outline.py` will validate this order and log a warning if consecutive `universal_weakness` scenes are detected, but it will NOT auto-reorder. The ordering decision is yours.
 
 ### Narrative Weight Assignment
 
@@ -225,7 +241,7 @@ Design what data the video's conclusion will reference and what recommendation i
     "tactical_brief_aligned": true      // false if overriding recommended_pick
   },
 
-  "selected_themes": [
+  "selected_themes": [  // ⚠️ ARRAY ORDER = SCENE ORDER in the final video
     {
       "theme_name": "string — from common_themes[].theme_name",
       "category_pattern_type": "differentiator | universal_weakness | universal_strength | mixed",
@@ -234,6 +250,7 @@ Design what data the video's conclusion will reference and what recommendation i
       "selection_rationale": "string — why this theme was included"
     }
   ],
+  "ordering_rationale": "string — why themes are ordered this way (energy curve, hook payoff position, interleaving strategy)",
 
   "excluded_themes": [
     {

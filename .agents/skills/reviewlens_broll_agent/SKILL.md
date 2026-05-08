@@ -30,11 +30,6 @@ You MUST NOT touch:
 
 You must strictly follow these steps in order when invoked.
 
-### Step 0: Screen Data Injection (Prerequisite)
-- **Action**: Inject chart data and numerical statistics into the script for visual graphics generation.
-- **Command**: `python tools/inject_screen_data.py`
-- **Purpose**: Enriches the script with screen-level data (charts, stats) that drive visual asset selection. Must run before any B-roll mapping.
-
 ### Step 1: Merge Block Timestamps
 - **Action**: Run the timestamp merging tool via terminal.
 - **Command**: `python tools/merge_block_timestamps.py`

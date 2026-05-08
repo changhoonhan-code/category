@@ -25,6 +25,7 @@ description: Script Drafting prep session — build_outline.py. Deterministic st
 
 1. Run `python tools/filter_category.py --profile writer` to generate `data/category_writer.json`.
 2. Run `python tools/render_writer_brief.py` to generate `data/writer_brief.md`.
+3. Run `python tools/extract_visual_datasets.py` to generate `data/visual_datasets.json`.
 
 ## Completion
 

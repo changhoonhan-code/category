@@ -12,9 +12,6 @@ Verify the existence of the following file:
 
 - `data/script_output.json`
 
-> [!WARNING]
-> If the above is missing, output a **warning message**: "Script Writing and Review are not complete. Please run `/run_write` (new session) then `/run_review` first."
-
 ---
 
 ## Step 0: Session Cleanup
@@ -52,7 +49,7 @@ This file is preserved throughout the entire N-group execution:
 The Narration Agent writes each `tts_prompt_{block_id}.txt` as a self-contained prompt: Preamble → Audio Profile → Director's note → Scene → Sample Context → Transcript. Each prompt file is self-contained — the TTS API receives only `prompt`, no separate system instruction.
 
 > [!NOTE]
-> Skill file loading (SKILL.md) happens **per group session** in the `/prompt` workflow. The agent constructs the Audio Profile section directly from script data — no separate generation step required.
+> Skill file loading (SKILL.md) happens **per group session** in the `/8_prompt` workflow. The agent constructs the Audio Profile section directly from script data — no separate generation step required.
 
 ---
 
@@ -60,7 +57,7 @@ The Narration Agent writes each `tts_prompt_{block_id}.txt` as a self-contained 
 
 > This step runs across **multiple separate sessions** (5 blocks per group) to prevent cognitive overload.
 > Each session loads ALL skill files fresh — the repeated cost is quality insurance, not waste.
-> See `/prompt` workflow for the full per-group execution protocol.
+> See `/8_prompt` workflow for the full per-group execution protocol.
 
 ### Quick Reference
 

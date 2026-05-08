@@ -516,6 +516,58 @@ def verify_pacing_distribution(scenes, runtime_meta):
                 f"above target range {lo_pct}-{hi_pct}%. Data may justify this — review manually."
             )
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Energy Curve Validation — warn on consecutive universal_weakness scenes
+# (Ordering is Blueprint Designer's responsibility; this is a guardrail only)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _get_pattern_type(scene):
+    """Extract category_pattern_type from a metric_chapter scene's notes."""
+    notes = scene.get('notes', '')
+    for pt in ('differentiator', 'universal_weakness', 'universal_strength', 'mixed'):
+        if f'pattern_type={pt}' in notes:
+            return pt
+    return 'unknown'
+
+
+def validate_scene_order(theme_scenes):
+    """Validate that Blueprint Designer's theme order follows energy curve rules.
+
+    Does NOT reorder — only logs warnings for Blueprint Designer to fix upstream.
+
+    Checks:
+    1. Consecutive universal_weakness scenes (energy dip)
+    2. Last metric chapter is universal_weakness (weak Verdict lead-in)
+
+    Returns:
+        list: warning messages (empty if order is clean)
+    """
+    warnings = []
+
+    if len(theme_scenes) <= 1:
+        return warnings
+
+    types = [_get_pattern_type(s) for s in theme_scenes]
+    ids = [s.get('scene_id', '') for s in theme_scenes]
+
+    # -- Check 1: consecutive universal_weakness
+    for i in range(len(types) - 1):
+        if types[i] == 'universal_weakness' and types[i + 1] == 'universal_weakness':
+            warnings.append(
+                f"ENERGY CURVE WARNING: Consecutive universal_weakness scenes "
+                f"'{ids[i]}' → '{ids[i + 1]}' (positions {i},{i + 1}). "
+                f"Back-to-back 'nobody wins' chapters create a sustained energy dip. "
+                f"Fix in Blueprint Designer: interleave a differentiator between them.")
+
+    # -- Check 2: last metric chapter is universal_weakness
+    if types and types[-1] == 'universal_weakness':
+        warnings.append(
+            f"ENERGY CURVE NOTE: Last metric chapter '{ids[-1]}' is universal_weakness. "
+            f"Consider ending with a differentiator for stronger Verdict lead-in.")
+
+    return warnings
+
+
 def main():
     blueprint_path = "data/comparison_blueprint.json"
     # -- blueprint 프로파일 출력을 직접 참조 (별도 structure_engineer 프로파일 불필요)
@@ -533,6 +585,11 @@ def main():
     scenes.append(build_hook_scene(blueprint))
     scenes.append(build_overview_scene(blueprint, cat_data))
     theme_scenes, theme_warnings = build_theme_scenes(blueprint, cat_data)
+    
+    # -- Energy curve validation: warn on consecutive universal_weakness
+    energy_warnings = validate_scene_order(theme_scenes)
+    theme_warnings.extend(energy_warnings)
+    
     scenes.extend(theme_scenes)
     
     landmine = build_landmine_scene(blueprint, cat_data)

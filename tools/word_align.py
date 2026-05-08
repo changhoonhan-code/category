@@ -72,8 +72,8 @@ def align_one(model, block: Dict, audio_path: str):
     block_id = block["block_id"]
 
     try:
-        # 모델의 align 함수 호출 (언어를 영어로 고정하여 성능 극대화)
-        result = model.align(audio_path, block["narration"], language='en', fast_mode=True)
+        # 정확도를 위해 GPU를 사용하며 fast_mode를 끕니다.
+        result = model.align(audio_path, block["narration"], language='en')
         
         timestamps = []
         # result.segments -> result.words 형태에서 모든 단어 추출
@@ -104,9 +104,9 @@ def run_alignment(
     results = {}
     all_warnings = []
     
-    print("[word_align] stable-ts (Whisper base.en) 모델 로드 중... (CPU)", file=sys.stderr, flush=True)
-    # Whisper base.en 모델 로드 (상대적으로 가볍고 빠름)
-    model = stable_whisper.load_model('base.en')
+    print("[word_align] stable-ts (Whisper large-v3) 모델 로드 중... (GPU/CUDA)", file=sys.stderr, flush=True)
+    # 최고 정확도를 위해 large-v3 모델 사용 및 GPU 가속 활성화
+    model = stable_whisper.load_model('large-v3', device='cuda')
     
     for block in blocks:
         block_id = block["block_id"]

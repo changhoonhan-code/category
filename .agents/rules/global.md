@@ -1,5 +1,5 @@
 ---
-trigger: always_on
+trigger: manual
 ---
 
 1. **Project Purpose**: Script production for search-oriented/evergreen video content targeted at Western English-speaking audiences.
@@ -8,3 +8,5 @@ trigger: always_on
    - **Narration Quality**: While generated via TTS, the audio must perfectly replicate natural human breathing, conversational pacing, and intricate vocal details.
 
 2. **File Encoding Requirement**: Whenever an agent creates or modifies text files, it MUST ensure the file is saved with `utf-8` encoding.
+
+3. **Temporary Files**: Any temporary files or one-off scripts created during operations MUST be placed in the `tmp/` directory.

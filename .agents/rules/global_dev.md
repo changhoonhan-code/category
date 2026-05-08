@@ -1,5 +1,5 @@
 ---
-trigger: manual
+trigger: always_on
 ---
 
 1. **Developer Chat & Artifacts (Korean)**: The conversational dialogue between the User and the Orchestrator (Main Agent) is strictly in Korean with short sentence to facilitate rapid brainstorming and architectural design.
@@ -11,4 +11,6 @@ trigger: manual
    - **Script Division of Labor**: Granular data and numbers are handled visually by on-screen graphics; the spoken dialogue focuses on data interpretation, analytical insights, and narrative flow.
    - **Narration Quality**: While generated via TTS, the audio must perfectly replicate natural human breathing, conversational pacing, and intricate vocal details.
 
-4. **File Encoding Requirement**: Whenever an agent creates or modifies text files (especially prompt files or JSONs), it MUST ensure the file is saved with `utf-8` encoding to prevent Unicode character corruption (such as em-dashes `—` turning into `??`).
+4. **File Encoding Requirement**: Whenever an agent creates or modifies text files, it MUST ensure the file is saved with `utf-8` encoding.
+
+5. **Temporary Files**: Any temporary files or one-off scripts created during operations MUST be placed in the `tmp/` directory.

@@ -110,5 +110,5 @@ Each flag appends an entry to the `critique_log` array at the root level of `dat
    Group entries by `fix_type`. If `critique_log_additions` is empty, print: **"No structural issues found."**
 
 4. **Print Decision Prompt** to the user:
-   - If flags exist: **"Tone step complete. {N} issue(s) flagged. Review the items above — re-run `/4_write` to regenerate narration, or edit `data/raw_draft.md` directly and re-run `/5_decompose`."**
-   - If no flags: **"Tone step complete. Script finalized to `script_output.json`. Proceed to production steps (`/run_media` or `/run_audio`)."**
+   - If flags exist: **"Tone step complete. {N} issue(s) flagged. Review the items above — re-run `/4_write` to regenerate narration, or edit `data/3_draft.md` directly and re-run `/5_decompose`."**
+   - If no flags: **"Tone step complete. Script finalized to `script_output.json`. Proceed to production steps (`/9_media` or `/8_audio`)."**
