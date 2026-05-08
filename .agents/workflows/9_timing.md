@@ -6,7 +6,7 @@ description: Review Timing — Orchestrator maps evidence reviews to narration t
 
 > **Agent**: Orchestrator (direct execution — no subagent SKILL needed).
 > **Execution Model**: Sequential N-Block — each group processes up to 5 blocks in a **SEPARATE fresh session** to prevent context overload.
-> **Purpose**: Assign `display_start_sec` and `display_end_sec` to each evidence review, so Remotion knows WHEN to show each review card during the narration.
+> **Purpose**: Assign `start_sec` and `end_sec` to each evidence review, so Remotion knows WHEN to show each review card during the narration.
 
 ## Prerequisites
 

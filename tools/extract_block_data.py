@@ -20,7 +20,7 @@ import re
 import pymysql
 from bs4 import BeautifulSoup
 
-from config import DATAS_DIR, PROJ_ROOT
+from config import DATAS_DIR, PROJ_ROOT, DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
 
 OUTPUT_DIR = os.path.join(DATAS_DIR, "blocks")
 
@@ -38,12 +38,6 @@ def load_manifest():
 
 
 # ── DB review fetcher (reuses review_capture_image.py logic) ──────────────────
-
-DB_HOST = "***REDACTED_IP***"
-DB_USER = "***REDACTED_USER***"
-DB_PASS = "***REDACTED_PASS***"
-DB_NAME = "***REDACTED_DB***"
-DB_PORT = 3306
 
 _db_conn = None
 

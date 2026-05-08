@@ -2,7 +2,7 @@
 Review Timing — Step 3: Inject Timing into Block JSONs
 ──────────────────────────────────────────────────────
 Reads the orchestrator's timing output (tmp/review_timing_output.json)
-and injects display_start_sec / display_end_sec into each block's
+and injects start_sec / end_sec into each block's
 evidence_reviews in data/blocks/*.json.
 
 Input:  tmp/review_timing_output.json
@@ -34,16 +34,16 @@ def validate_timing(block_entry, audio_duration):
     prev_end = -1.0
     for i, a in enumerate(assignments):
         rid = a.get("review_id", "?")
-        start = a.get("display_start_sec", -1)
-        end = a.get("display_end_sec", -1)
+        start = a.get("start_sec", -1)
+        end = a.get("end_sec", -1)
         
         # Check bounds
         if start < 0:
-            errors.append(f"[{review_id}/{rid}] display_start_sec={start} is negative")
+            errors.append(f"[{review_id}/{rid}] start_sec={start} is negative")
         if end > audio_duration + 0.5:
-            errors.append(f"[{review_id}/{rid}] display_end_sec={end} exceeds audio duration {audio_duration}")
+            errors.append(f"[{review_id}/{rid}] end_sec={end} exceeds audio duration {audio_duration}")
         if end <= start:
-            errors.append(f"[{review_id}/{rid}] display_end_sec={end} <= display_start_sec={start}")
+            errors.append(f"[{review_id}/{rid}] end_sec={end} <= start_sec={start}")
         
         # Check ordering (should be chronological)
         if start < prev_end - 0.1:  # small tolerance
@@ -112,8 +112,8 @@ def main():
             rid = rev["review_id"]
             if rid in assign_map:
                 a = assign_map[rid]
-                rev["display_start_sec"] = round(a["display_start_sec"], 2)
-                rev["display_end_sec"] = round(a["display_end_sec"], 2)
+                rev["start_sec"] = round(a["start_sec"], 2)
+                rev["end_sec"] = round(a["end_sec"], 2)
                 if "matched_sentence" in a:
                     rev["matched_sentence"] = a["matched_sentence"]
         

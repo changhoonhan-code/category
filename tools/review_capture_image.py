@@ -8,7 +8,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # config에서 필요한 경로 임포트
-from config import DATAS_DIR, INPUT_DIR, PROJ_ROOT, TMP_DIR
+from config import DATAS_DIR, INPUT_DIR, PROJ_ROOT, TMP_DIR, DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
 import hashlib
 
 # ── 디자인 상수 (Amazon 리뷰 원본 스타일 완벽 대응) ─────────
@@ -34,13 +34,6 @@ FONT_DIR = os.path.join(ASSET_DIR, "fonts")
 
 # ── DB 유틸 함수 ────────────────────────────────────────────────────────
 def get_html_from_db(review_id):
-    # TODO: 아래의 연결 정보를 실제 환경에 맞게 수정해주세요.
-    DB_HOST = "***REDACTED_IP***"
-    DB_USER = "***REDACTED_USER***"
-    DB_PASS = "***REDACTED_PASS***"
-    DB_NAME = "***REDACTED_DB***"
-    DB_PORT = 3306
-
     try:
         conn = pymysql.connect(
             host=DB_HOST,

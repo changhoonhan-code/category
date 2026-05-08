@@ -5,6 +5,7 @@ ReviewLens 공유 설정 — 모든 도구가 참조하는 모델 ID, 경로, �
     from config import MODELS, PROJ_ROOT, DATAS_DIR
 """
 import os
+from dotenv import load_dotenv
 
 # ── 프로젝트 경로 ────────────────────────────────────────────────────────────
 PROJ_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -12,6 +13,16 @@ DATAS_DIR = os.path.join(PROJ_ROOT, "data")
 INPUT_DIR = os.path.join(PROJ_ROOT, "products")
 TOOLS_DIR = os.path.join(PROJ_ROOT, "tools")
 TMP_DIR = os.path.join(PROJ_ROOT, "tmp")
+
+# ── .env 로드 ────────────────────────────────────────────────────────────────
+load_dotenv(os.path.join(PROJ_ROOT, ".env"))
+
+# ── DB 설정 ──────────────────────────────────────────────────────────────────
+DB_HOST = os.getenv("DB_HOST", "")
+DB_USER = os.getenv("DB_USER", "")
+DB_PASS = os.getenv("DB_PASS", "")
+DB_NAME = os.getenv("DB_NAME", "")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
 
 # ── Gemini API 모델 ID ──────────────────────────────────────────────────────
 MODELS = {
